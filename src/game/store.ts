@@ -1,43 +1,52 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type Tab = "tap" | "rush" | "pit" | "shop" | "you";
+export type Tab = "lobby" | "crash" | "dice" | "mines" | "coinflip" | "wallet" | "history" | "profile";
+
+export interface BetRecord {
+  id: string;
+  game: string;
+  amount: number;
+  multiplier?: number;
+  payout: number;
+  won: boolean;
+  time: number;
+}
 
 interface GameState {
   tab: Tab;
-  coins: number;
-  gems: number;
-  xp: number;
-  prestige: number;
-  sound: boolean;
-  tapPower: number;
+  balance: number;
+  history: BetRecord[];
   setTab: (t: Tab) => void;
-  toggleSound: () => void;
-  tap: () => void;
+  placeBet: (game: string, amount: number, multiplier: number, won: boolean) => void;
+  addBalance: (amount: number) => void;
 }
 
 export const useGame = create<GameState>()(
   persist(
     (set, get) => ({
-      tab: "tap",
-      coins: 0,
-      gems: 0,
-      xp: 0,
-      prestige: 0,
-      sound: true,
-      tapPower: 1,
+      tab: "lobby",
+      balance: 10000, // starting balance
+      history: [],
       setTab: (tab) => set({ tab }),
-      toggleSound: () => set({ sound: !get().sound }),
-      tap: () => {
-        const power = get().tapPower;
+      placeBet: (game, amount, multiplier, won) => {
+        const payout = won ? Math.floor(amount * multiplier) : 0;
+        const record: BetRecord = {
+          id: Date.now().toString() + Math.random().toString(36).slice(2),
+          game,
+          amount,
+          multiplier: won ? multiplier : 0,
+          payout,
+          won,
+          time: Date.now(),
+        };
         set((s) => ({
-          coins: s.coins + power,
-          xp: s.xp + power,
+          balance: s.balance - amount + payout,
+          history: [record, ...s.history].slice(0, 50),
         }));
       },
+      addBalance: (amount) => set((s) => ({ balance: s.balance + amount })),
     }),
-    {
-      name: "tap-rush-v4",
-    }
+    { name: "betting-app-v1" }
   )
 );
