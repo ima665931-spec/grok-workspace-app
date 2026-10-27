@@ -1,14 +1,13 @@
+import { useState } from "react";
 import {
   Gamepad2,
   TrendingUp,
   Dices,
   Bomb,
   Wallet,
-  History,
-  User,
   Coins,
 } from "lucide-react";
-import { useGame, type Tab } from "@/game/store";
+import { useGame } from "@/game/store";
 import { formatCoins } from "@/game/logic";
 import { Lobby } from "./Lobby";
 import { CrashGame } from "./CrashGame";
@@ -19,6 +18,8 @@ import { WalletPanel } from "./WalletPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { ProfilePanel } from "./ProfilePanel";
 
+type Tab = "lobby" | "crash" | "dice" | "mines" | "coinflip" | "wallet" | "history" | "profile";
+
 const NAV: { id: Tab; label: string; icon: any }[] = [
   { id: "lobby", label: "Games", icon: Gamepad2 },
   { id: "crash", label: "Crash", icon: TrendingUp },
@@ -28,8 +29,7 @@ const NAV: { id: Tab; label: string; icon: any }[] = [
 ];
 
 export function GameApp() {
-  const tab = useGame((s) => s.tab);
-  const setTab = useGame((s) => s.setTab);
+  const [tab, setTab] = useState<Tab>("lobby");
   const balance = useGame((s) => s.balance);
 
   return (
@@ -51,8 +51,7 @@ export function GameApp() {
           position: "sticky",
           top: 0,
           zIndex: 30,
-          background: "rgba(11,14,17,0.95)",
-          backdropFilter: "blur(12px)",
+          background: "#0b0e11",
           borderBottom: "1px solid #1e2329",
           padding: "12px 16px",
           display: "flex",
@@ -84,12 +83,12 @@ export function GameApp() {
 
       {/* Content */}
       <main style={{ flex: 1, overflowY: "auto", paddingBottom: 80 }}>
-        {tab === "lobby" && <Lobby />}
+        {tab === "lobby" && <Lobby onNavigate={setTab} />}
         {tab === "crash" && <CrashGame />}
         {tab === "dice" && <DiceGame />}
         {tab === "mines" && <MinesGame />}
         {tab === "coinflip" && <CoinFlipGame />}
-        {tab === "wallet" && <WalletPanel />}
+        {tab === "wallet" && <WalletPanel onNavigate={setTab} />}
         {tab === "history" && <HistoryPanel />}
         {tab === "profile" && <ProfilePanel />}
       </main>
@@ -108,7 +107,7 @@ export function GameApp() {
           display: "flex",
           justifyContent: "space-around",
           padding: "8px 0 12px",
-          zIndex: 40,
+          zIndex: 50,
         }}
       >
         {NAV.map((item) => {
