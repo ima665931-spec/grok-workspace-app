@@ -1,4 +1,6 @@
-import { useState } from "react";
+"use client";
+
+import { useState, useEffect } from "react";
 import {
   Gamepad2,
   TrendingUp,
@@ -29,8 +31,21 @@ const NAV: { id: Tab; label: string; icon: any }[] = [
 ];
 
 export function GameApp() {
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<Tab>("lobby");
   const balance = useGame((s) => s.balance);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0b0e11", color: "#eaecef", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div
@@ -45,7 +60,6 @@ export function GameApp() {
         fontFamily: "system-ui, -apple-system, sans-serif",
       }}
     >
-      {/* Header */}
       <header
         style={{
           position: "sticky",
@@ -81,7 +95,6 @@ export function GameApp() {
         </div>
       </header>
 
-      {/* Content */}
       <main style={{ flex: 1, overflowY: "auto", paddingBottom: 80 }}>
         {tab === "lobby" && <Lobby onNavigate={setTab} />}
         {tab === "crash" && <CrashGame />}
@@ -93,7 +106,6 @@ export function GameApp() {
         {tab === "profile" && <ProfilePanel />}
       </main>
 
-      {/* Bottom Nav */}
       <nav
         style={{
           position: "fixed",
@@ -116,7 +128,11 @@ export function GameApp() {
           return (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
+              type="button"
+              onClick={() => {
+                console.log("Switching to", item.id);
+                setTab(item.id);
+              }}
               style={{
                 display: "flex",
                 flexDirection: "column",
