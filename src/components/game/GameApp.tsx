@@ -1,6 +1,4 @@
-"use client";
-
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Gamepad2,
   TrendingUp,
@@ -9,8 +7,8 @@ import {
   Wallet,
   Coins,
 } from "lucide-react";
-import { useGame } from "@/game/store";
-import { formatCoins } from "@/game/logic";
+import { useGame } from "../../game/store";
+import { formatCoins } from "../../game/logic";
 import { Lobby } from "./Lobby";
 import { CrashGame } from "./CrashGame";
 import { DiceGame } from "./DiceGame";
@@ -31,21 +29,8 @@ const NAV: { id: Tab; label: string; icon: any }[] = [
 ];
 
 export function GameApp() {
-  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<Tab>("lobby");
   const balance = useGame((s) => s.balance);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#0b0e11", color: "#eaecef", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        Loading...
-      </div>
-    );
-  }
 
   return (
     <div
@@ -77,7 +62,6 @@ export function GameApp() {
           <TrendingUp size={20} color="#f0b90b" />
           BetRush
         </div>
-
         <div
           style={{
             background: "#1e2329",
@@ -129,10 +113,7 @@ export function GameApp() {
             <button
               key={item.id}
               type="button"
-              onClick={() => {
-                console.log("Switching to", item.id);
-                setTab(item.id);
-              }}
+              onClick={() => setTab(item.id)}
               style={{
                 display: "flex",
                 flexDirection: "column",
