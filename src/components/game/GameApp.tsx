@@ -23,36 +23,31 @@ export function GameApp() {
   const coins = useGame((s) => s.coins);
   const gems = useGame((s) => s.gems);
   const xp = useGame((s) => s.xp);
-
   const level = levelOf(xp);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col max-w-lg mx-auto">
-      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-lg font-bold tracking-tight shrink-0">Tap Rush</h1>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground truncate">
-            <span className="flex items-center gap-1">
-              <Coins className="size-3.5 text-yellow-500" />
-              {formatCoins(coins)}
+    <div style={{ minHeight: "100vh", background: "#0a0a0b", color: "#fafafa", display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
+      {/* Header */}
+      <header style={{ position: "sticky", top: 0, zIndex: 20, background: "rgba(10,10,11,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid #27272a", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Tap Rush</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#a1a1aa" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <Coins size={14} color="#facc15" /> {formatCoins(coins)}
             </span>
-            <span className="flex items-center gap-1">
-              <Gem className="size-3.5 text-cyan-400" />
-              {gems}
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <Gem size={14} color="#22d3ee" /> {gems}
             </span>
-            <span className="text-xs opacity-70">Lv.{level}</span>
+            <span style={{ fontSize: 11, opacity: 0.7 }}>Lv.{level}</span>
           </div>
         </div>
-        <button
-          onClick={toggleSound}
-          className="p-2 rounded-lg hover:bg-muted transition"
-          aria-label="Toggle sound"
-        >
-          {sound ? <Volume2 className="size-5" /> : <VolumeX className="size-5" />}
+        <button onClick={toggleSound} style={{ padding: 8, borderRadius: 8 }}>
+          {sound ? <Volume2 size={20} /> : <VolumeX size={20} />}
         </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto">
+      {/* Content */}
+      <main style={{ flex: 1, overflowY: "auto" }}>
         {tab === "tap" && <TapStage />}
         {tab === "rush" && <RushPanel />}
         {tab === "pit" && <PitPanel />}
@@ -60,21 +55,32 @@ export function GameApp() {
         {tab === "you" && <YouPanel />}
       </main>
 
-      <nav className="sticky bottom-0 z-20 bg-background/95 backdrop-blur border-t border-border flex justify-around py-2 px-1">
-        {NAV.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition min-w-[3.5rem] ${
-              tab === id
-                ? "text-yellow-400 bg-yellow-400/10"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Icon className="size-5" />
-            <span className="text-[10px] font-medium">{label}</span>
-          </button>
-        ))}
+      {/* Bottom Nav */}
+      <nav style={{ position: "sticky", bottom: 0, zIndex: 20, background: "rgba(10,10,11,0.95)", backdropFilter: "blur(12px)", borderTop: "1px solid #27272a", display: "flex", justifyContent: "space-around", padding: "8px 4px" }}>
+        {NAV.map(({ id, label, icon: Icon }) => {
+          const active = tab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+                padding: "6px 12px",
+                borderRadius: 12,
+                minWidth: 56,
+                color: active ? "#facc15" : "#71717a",
+                background: active ? "rgba(250,204,21,0.1)" : "transparent",
+                transition: "all 0.15s",
+              }}
+            >
+              <Icon size={20} />
+              <span style={{ fontSize: 10, fontWeight: 500 }}>{label}</span>
+            </button>
+          );
+        })}
       </nav>
     </div>
   );

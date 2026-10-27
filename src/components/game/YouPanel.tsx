@@ -8,30 +8,37 @@ export function YouPanel() {
   const prestige = useGame((s) => s.prestige);
   const level = levelOf(xp);
 
+  const card = {
+    background: "#141416",
+    borderRadius: 16,
+    padding: 16,
+    border: "1px solid #27272a",
+  };
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="text-center space-y-1">
-        <div className="text-5xl">👤</div>
-        <h2 className="text-xl font-bold">Player</h2>
-        <p className="text-muted-foreground text-sm">Level {level}</p>
+    <div style={{ padding: 24 }}>
+      <div style={{ textAlign: "center", marginBottom: 28 }}>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>👤</div>
+        <h2 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 4px" }}>Player</h2>
+        <p style={{ color: "#a1a1aa", fontSize: 14, margin: 0 }}>Level {level}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-card rounded-xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground">Coins</p>
-          <p className="text-2xl font-bold text-yellow-400">{formatCoins(coins)}</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={card}>
+          <p style={{ color: "#a1a1aa", fontSize: 12, margin: "0 0 4px" }}>Coins</p>
+          <p style={{ fontSize: 22, fontWeight: 700, color: "#facc15", margin: 0 }}>{formatCoins(coins)}</p>
         </div>
-        <div className="bg-card rounded-xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground">Gems</p>
-          <p className="text-2xl font-bold text-cyan-400">{gems}</p>
+        <div style={card}>
+          <p style={{ color: "#a1a1aa", fontSize: 12, margin: "0 0 4px" }}>Gems</p>
+          <p style={{ fontSize: 22, fontWeight: 700, color: "#22d3ee", margin: 0 }}>{gems}</p>
         </div>
-        <div className="bg-card rounded-xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground">XP</p>
-          <p className="text-2xl font-bold">{formatCoins(xp)}</p>
+        <div style={card}>
+          <p style={{ color: "#a1a1aa", fontSize: 12, margin: "0 0 4px" }}>XP</p>
+          <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{formatCoins(xp)}</p>
         </div>
-        <div className="bg-card rounded-xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground">Prestige</p>
-          <p className="text-2xl font-bold">{prestige}</p>
+        <div style={card}>
+          <p style={{ color: "#a1a1aa", fontSize: 12, margin: "0 0 4px" }}>Prestige</p>
+          <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{prestige}</p>
         </div>
       </div>
     </div>

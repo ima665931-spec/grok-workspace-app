@@ -1,10 +1,10 @@
 export function RushPanel() {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4 text-center gap-3">
-      <div className="text-5xl">⏱️</div>
-      <h2 className="text-xl font-bold">Rush Mode</h2>
-      <p className="text-muted-foreground text-sm max-w-xs">
-        Timed challenges coming in the next update.
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "64px 16px", textAlign: "center", gap: 12 }}>
+      <div style={{ fontSize: 48 }}>⏱️</div>
+      <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Rush Mode</h2>
+      <p style={{ color: "#a1a1aa", fontSize: 14, maxWidth: 260, margin: 0 }}>
+        Timed challenges coming soon.
       </p>
     </div>
   );
