@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useGame } from "@/game/store";
-import { formatCoins } from "@/game/logic";
+import { useGame } from "../../game/store";
+import { formatCoins } from "../../game/logic";
 
 export function CrashGame() {
   const balance = useGame((s) => s.balance);
@@ -11,6 +11,7 @@ export function CrashGame() {
   const [status, setStatus] = useState<"waiting" | "running" | "crashed">("waiting");
   const [cashedOut, setCashedOut] = useState(false);
   const [crashPoint, setCrashPoint] = useState(0);
+  const cashedOutRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
 
   const startRound = () => {
@@ -19,15 +20,15 @@ export function CrashGame() {
     setStatus("running");
     setMultiplier(1);
     setCashedOut(false);
+    cashedOutRef.current = false;
 
-    // Random crash between 1.00x - 10x (weighted towards lower)
     const r = Math.random();
-    const point = r < 0.5 ? 1 + Math.random() * 1.5 : 1 + Math.random() * 8;
+    const point = r < 0.55 ? 1 + Math.random() * 1.8 : 1 + Math.random() * 9;
     setCrashPoint(Number(point.toFixed(2)));
 
     let current = 1;
     intervalRef.current = window.setInterval(() => {
-      current += 0.01 + current * 0.012;
+      current += 0.01 + current * 0.014;
       const m = Number(current.toFixed(2));
       setMultiplier(m);
 
@@ -35,8 +36,7 @@ export function CrashGame() {
         if (intervalRef.current) clearInterval(intervalRef.current);
         setStatus("crashed");
         setMultiplier(point);
-        // If not cashed out → lose
-        if (!cashedOut) {
+        if (!cashedOutRef.current) {
           placeBet("Crash", betAmount, 0, false);
         }
       }
@@ -44,7 +44,8 @@ export function CrashGame() {
   };
 
   const cashOut = () => {
-    if (status !== "running" || cashedOut) return;
+    if (status !== "running" || cashedOutRef.current) return;
+    cashedOutRef.current = true;
     setCashedOut(true);
     placeBet("Crash", betAmount, multiplier, true);
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -57,52 +58,67 @@ export function CrashGame() {
     };
   }, []);
 
+  const isGreen = status !== "crashed";
+
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>📈 Crash</h2>
+    <div style={{ padding: "16px 16px 24px" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 16px", letterSpacing: "-0.02em" }}>Crash</h2>
 
       {/* Multiplier Display */}
       <div style={{
-        background: "#1e2329",
-        borderRadius: 16,
-        height: 180,
+        background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+        borderRadius: 20,
+        height: 200,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
         marginBottom: 20,
-        border: "1px solid #2b3139"
+        border: `1px solid ${status === "crashed" ? "rgba(246,70,93,0.3)" : "rgba(14,203,129,0.15)"}`,
+        position: "relative",
+        overflow: "hidden",
       }}>
         <div style={{
-          fontSize: 56,
+          position: "absolute", inset: 0, opacity: 0.12,
+          background: status === "crashed"
+            ? "radial-gradient(circle at center, #f6465d, transparent 70%)"
+            : "radial-gradient(circle at center, #0ecb81, transparent 70%)",
+        }} />
+        <div style={{
+          fontSize: 64,
           fontWeight: 900,
-          color: status === "crashed" ? "#f6465d" : "#0ecb81",
-          fontVariantNumeric: "tabular-nums"
+          color: isGreen ? "#0ecb81" : "#f6465d",
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.04em",
+          textShadow: isGreen ? "0 0 40px rgba(14,203,129,0.4)" : "0 0 40px rgba(246,70,93,0.4)",
+          position: "relative",
         }}>
           {multiplier.toFixed(2)}x
         </div>
-        <div style={{ color: "#848e9c", fontSize: 13, marginTop: 4 }}>
+        <div style={{ color: "#8b949e", fontSize: 13, marginTop: 6, fontWeight: 500, position: "relative" }}>
           {status === "waiting" && "Place your bet"}
           {status === "running" && (cashedOut ? "Cashed out!" : "Running...")}
           {status === "crashed" && `Crashed at ${crashPoint.toFixed(2)}x`}
         </div>
       </div>
 
-      {/* Controls */}
+      {/* Amount chips */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {[100, 500, 1000, 2000].map((v) => (
           <button
             key={v}
+            type="button"
             onClick={() => setBetAmount(v)}
             style={{
               flex: 1,
-              padding: "10px 0",
-              borderRadius: 8,
-              border: betAmount === v ? "1px solid #f0b90b" : "1px solid #2b3139",
-              background: betAmount === v ? "rgba(240,185,11,0.15)" : "#1e2329",
-              color: "#eaecef",
-              fontWeight: 600,
-              cursor: "pointer"
+              padding: "11px 0",
+              borderRadius: 12,
+              border: betAmount === v ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
+              background: betAmount === v ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.03)",
+              color: betAmount === v ? "#f0b90b" : "#e6edf3",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer",
             }}
           >
             {v}
@@ -116,49 +132,54 @@ export function CrashGame() {
         onChange={(e) => setBetAmount(Number(e.target.value))}
         style={{
           width: "100%",
-          padding: "14px",
-          borderRadius: 10,
-          border: "1px solid #2b3139",
-          background: "#1e2329",
-          color: "#eaecef",
+          padding: "14px 16px",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.03)",
+          color: "#e6edf3",
           fontSize: 16,
-          marginBottom: 12,
-          boxSizing: "border-box"
+          fontWeight: 600,
+          marginBottom: 14,
+          outline: "none",
         }}
       />
 
       {status === "waiting" || status === "crashed" ? (
         <button
+          type="button"
           onClick={startRound}
           disabled={betAmount <= 0 || betAmount > balance}
           style={{
             width: "100%",
             padding: "16px",
-            borderRadius: 12,
+            borderRadius: 14,
             border: "none",
-            background: betAmount > balance ? "#2b3139" : "#0ecb81",
-            color: "#000",
-            fontWeight: 700,
+            background: betAmount > balance ? "#21262d" : "linear-gradient(135deg, #0ecb81, #0ba86a)",
+            color: betAmount > balance ? "#6e7681" : "#fff",
+            fontWeight: 800,
             fontSize: 16,
-            cursor: betAmount > balance ? "not-allowed" : "pointer"
+            cursor: betAmount > balance ? "not-allowed" : "pointer",
+            boxShadow: betAmount > balance ? "none" : "0 4px 20px rgba(14,203,129,0.3)",
           }}
         >
           Bet ₹{formatCoins(betAmount)}
         </button>
       ) : (
         <button
+          type="button"
           onClick={cashOut}
           disabled={cashedOut}
           style={{
             width: "100%",
             padding: "16px",
-            borderRadius: 12,
+            borderRadius: 14,
             border: "none",
-            background: cashedOut ? "#2b3139" : "#f0b90b",
-            color: "#000",
-            fontWeight: 700,
+            background: cashedOut ? "#21262d" : "linear-gradient(135deg, #f0b90b, #e5a800)",
+            color: cashedOut ? "#6e7681" : "#0a0c10",
+            fontWeight: 800,
             fontSize: 16,
-            cursor: cashedOut ? "not-allowed" : "pointer"
+            cursor: cashedOut ? "not-allowed" : "pointer",
+            boxShadow: cashedOut ? "none" : "0 4px 20px rgba(240,185,11,0.35)",
           }}
         >
           {cashedOut ? "Cashed Out" : `Cash Out ₹${formatCoins(Math.floor(betAmount * multiplier))}`}

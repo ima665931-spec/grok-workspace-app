@@ -36,50 +36,65 @@ export function GameApp() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#0b0e11",
-        color: "#eaecef",
+        background: "linear-gradient(180deg, #0a0c10 0%, #0d1117 40%, #0a0c10 100%)",
+        color: "#e6edf3",
         display: "flex",
         flexDirection: "column",
         maxWidth: 480,
         margin: "0 auto",
-        fontFamily: "system-ui, -apple-system, sans-serif",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       }}
     >
+      {/* Header */}
       <header
         style={{
           position: "sticky",
           top: 0,
           zIndex: 30,
-          background: "#0b0e11",
-          borderBottom: "1px solid #1e2329",
-          padding: "12px 16px",
+          background: "rgba(10, 12, 16, 0.85)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          padding: "14px 18px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
         }}
       >
-        <div style={{ fontWeight: 700, fontSize: 17, display: "flex", alignItems: "center", gap: 8 }}>
-          <TrendingUp size={20} color="#f0b90b" />
-          BetRush
+        <div style={{ fontWeight: 800, fontSize: 18, display: "flex", alignItems: "center", gap: 8, letterSpacing: "-0.02em" }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: "linear-gradient(135deg, #f0b90b, #fcd535)",
+            display: "flex", alignItems: "center", justifyContent: "center"
+          }}>
+            <TrendingUp size={16} color="#0a0c10" strokeWidth={2.5} />
+          </div>
+          <span style={{ background: "linear-gradient(90deg, #f0b90b, #fcd535)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            BetRush
+          </span>
         </div>
+
         <div
           style={{
-            background: "#1e2329",
-            padding: "6px 14px",
-            borderRadius: 20,
+            background: "linear-gradient(135deg, rgba(240,185,11,0.15), rgba(240,185,11,0.05))",
+            border: "1px solid rgba(240,185,11,0.25)",
+            padding: "7px 14px",
+            borderRadius: 24,
             fontSize: 14,
-            fontWeight: 600,
+            fontWeight: 700,
             display: "flex",
             alignItems: "center",
             gap: 6,
+            color: "#f0b90b",
           }}
         >
-          <Coins size={15} color="#f0b90b" />
-          {formatCoins(balance)}
+          <Coins size={15} />
+          ₹{formatCoins(balance)}
         </div>
       </header>
 
-      <main style={{ flex: 1, overflowY: "auto", paddingBottom: 80 }}>
+      {/* Content */}
+      <main style={{ flex: 1, overflowY: "auto", paddingBottom: 88 }}>
         {tab === "lobby" && <Lobby onNavigate={setTab} />}
         {tab === "crash" && <CrashGame />}
         {tab === "dice" && <DiceGame />}
@@ -90,6 +105,7 @@ export function GameApp() {
         {tab === "profile" && <ProfilePanel />}
       </main>
 
+      {/* Bottom Nav */}
       <nav
         style={{
           position: "fixed",
@@ -98,11 +114,13 @@ export function GameApp() {
           transform: "translateX(-50%)",
           width: "100%",
           maxWidth: 480,
-          background: "#12151a",
-          borderTop: "1px solid #1e2329",
+          background: "rgba(13, 17, 23, 0.92)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
           display: "flex",
           justifyContent: "space-around",
-          padding: "8px 0 12px",
+          padding: "10px 0 14px",
           zIndex: 50,
         }}
       >
@@ -118,17 +136,25 @@ export function GameApp() {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 3,
+                gap: 4,
                 background: "transparent",
                 border: "none",
-                color: active ? "#f0b90b" : "#848e9c",
+                color: active ? "#f0b90b" : "#6e7681",
                 fontSize: 11,
-                fontWeight: active ? 600 : 400,
-                padding: "4px 10px",
+                fontWeight: active ? 700 : 500,
+                padding: "4px 12px",
                 cursor: "pointer",
+                transition: "color 0.15s",
               }}
             >
-              <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+              <div style={{
+                width: 40, height: 28, borderRadius: 14,
+                background: active ? "rgba(240,185,11,0.12)" : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.15s",
+              }}>
+                <Icon size={20} strokeWidth={active ? 2.4 : 1.8} />
+              </div>
               {item.label}
             </button>
           );
