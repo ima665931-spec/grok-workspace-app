@@ -1,10 +1,10 @@
 import { useEffect } from "react";
-import { Coins, Dices, Gem, Store, Timer, UserRound, Volume2, VolumeX, Zap } from "lucide-react";
+import { Zap, Timer, Dices, Store, UserRound } from "lucide-react";
 import { useGame, type Tab } from "@/game/store";
-import { PitPanel } from "./PitPanel";
-import { RushPanel } from "./RushPanel";
-import { ShopPanel } from "./ShopPanel";
 import { TapStage } from "./TapStage";
+import { RushPanel } from "./RushPanel";
+import { PitPanel } from "./PitPanel";
+import { ShopPanel } from "./ShopPanel";
 import { YouPanel } from "./YouPanel";
 
 const NAV: { id: Tab; label: string; icon: typeof Zap }[] = [
@@ -21,25 +21,13 @@ export function GameApp() {
   const setTab = useGame((s) => s.setTab);
 
   useEffect(() => {
-    let raf = 0;
-    let last = performance.now();
-    const loop = (t: number) => {
-      const dt = Math.min(4 * 3600, (t - last) / 1000);
-      last = t;
-      useGame.getState().tick(dt);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    const unsub = useGame.persist.onFinishHydration(() => {
-      if (!useGame.getState().booted) useGame.getState().finishLoad();
-    });
-    if (useGame.persist.hasHydrated() && !useGame.getState().booted) {
-      useGame.getState().finishLoad();
-    }
-    return () => {
-      cancelAnimationFrame(raf);
-      unsub();
-    };
+    // Force boot after a short delay so we never stay on Loading forever
+    const t = setTimeout(() => {
+      if (!useGame.getState().booted) {
+        useGame.getState().finishLoad();
+      }
+    }, 300);
+    return () => clearTimeout(t);
   }, []);
 
   if (!booted) {
@@ -62,12 +50,14 @@ export function GameApp() {
         {tab === "shop" && <ShopPanel />}
         {tab === "you" && <YouPanel />}
       </main>
-      <nav className="border-t border-white/10 flex justify-around p-2 bg-black/90">
+      <nav className="border-t border-white/10 flex justify-around p-2 bg-black/90 safe-area-bottom">
         {NAV.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg ${tab === id ? "text-yellow-400" : "text-white/60"}`}
+            className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg transition ${
+              tab === id ? "text-yellow-400" : "text-white/60"
+            }`}
           >
             <Icon size={20} />
             <span className="text-xs">{label}</span>

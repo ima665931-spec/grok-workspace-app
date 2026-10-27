@@ -24,6 +24,10 @@ export const useGame = create<GameState>()(
       finishLoad: () => set({ booted: true }),
       addCoins: (n) => set({ coins: get().coins + n }),
     }),
-    { name: "tap-rush-v1" }
+    {
+      name: "tap-rush-v1",
+      // Don't persist booted so it always starts fresh on load
+      partialize: (state) => ({ tab: state.tab, coins: state.coins }),
+    }
   )
 );
