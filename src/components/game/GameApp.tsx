@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Zap, Timer, Dices, Store, UserRound } from "lucide-react";
 import { useGame, type Tab } from "@/game/store";
 import { TapStage } from "./TapStage";
@@ -17,32 +16,15 @@ const NAV: { id: Tab; label: string; icon: typeof Zap }[] = [
 
 export function GameApp() {
   const tab = useGame((s) => s.tab);
-  const booted = useGame((s) => s.booted);
   const setTab = useGame((s) => s.setTab);
 
-  useEffect(() => {
-    // Force boot after a short delay so we never stay on Loading forever
-    const t = setTimeout(() => {
-      if (!useGame.getState().booted) {
-        useGame.getState().finishLoad();
-      }
-    }, 300);
-    return () => clearTimeout(t);
-  }, []);
-
-  if (!booted) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        Loading...
-      </div>
-    );
-  }
-
+  // No more loading gate. Always show the UI.
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
       <header className="p-4 border-b border-white/10 flex items-center justify-between">
-        <h1 className="text-xl font-bold">Tap Rush</h1>
+        <h1 className="text-xl font-bold tracking-tight">Tap Rush</h1>
       </header>
+
       <main className="flex-1 overflow-auto p-4">
         {tab === "tap" && <TapStage />}
         {tab === "rush" && <RushPanel />}
@@ -50,17 +32,18 @@ export function GameApp() {
         {tab === "shop" && <ShopPanel />}
         {tab === "you" && <YouPanel />}
       </main>
-      <nav className="border-t border-white/10 flex justify-around p-2 bg-black/90 safe-area-bottom">
+
+      <nav className="border-t border-white/10 flex justify-around p-2 bg-black/95">
         {NAV.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={`flex flex-col items-center gap-1 px-3 py-2 rounded-lg transition ${
-              tab === id ? "text-yellow-400" : "text-white/60"
+              tab === id ? "text-yellow-400" : "text-white/50"
             }`}
           >
-            <Icon size={20} />
-            <span className="text-xs">{label}</span>
+            <Icon size={22} />
+            <span className="text-[11px] font-medium">{label}</span>
           </button>
         ))}
       </nav>
