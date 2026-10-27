@@ -1,3 +1,5 @@
+"use client";
+
 import { TrendingUp, Dices, Bomb, Coins, History, User } from "lucide-react";
 
 type Tab = "lobby" | "crash" | "dice" | "mines" | "coinflip" | "wallet" | "history" | "profile";
@@ -20,7 +22,11 @@ export function Lobby({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
           return (
             <button
               key={g.id}
-              onClick={() => onNavigate(g.id)}
+              type="button"
+              onClick={() => {
+                console.log("Lobby navigate to", g.id);
+                onNavigate(g.id);
+              }}
               style={{
                 background: "#1e2329",
                 border: "1px solid #2b3139",
@@ -43,6 +49,7 @@ export function Lobby({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
 
       <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 10 }}>
         <button
+          type="button"
           onClick={() => onNavigate("history")}
           style={{
             width: "100%",
@@ -63,6 +70,7 @@ export function Lobby({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
         </button>
 
         <button
+          type="button"
           onClick={() => onNavigate("profile")}
           style={{
             width: "100%",
