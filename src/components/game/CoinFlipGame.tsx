@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useGame } from "@/game/store";
-import { formatCoins } from "@/game/logic";
+import { useGame } from "../../game/store";
+import { formatCoins } from "../../game/logic";
 
 export function CoinFlipGame() {
   const balance = useGame((s) => s.balance);
@@ -15,76 +15,66 @@ export function CoinFlipGame() {
     if (betAmount <= 0 || betAmount > balance || flipping) return;
     setFlipping(true);
     setResult(null);
-
     setTimeout(() => {
       const res = Math.random() < 0.5 ? "heads" : "tails";
       setResult(res);
       const won = res === choice;
       placeBet("CoinFlip", betAmount, won ? 1.95 : 0, won);
       setFlipping(false);
-    }, 800);
+    }, 900);
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>🪙 Coin Flip</h2>
+    <div style={{ padding: "16px 16px 24px" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 16px", letterSpacing: "-0.02em" }}>Coin Flip</h2>
 
       <div style={{
-        background: "#1e2329",
-        borderRadius: 16,
-        height: 160,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        marginBottom: 20,
-        border: "1px solid #2b3139",
-        fontSize: 64
+        background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01))",
+        borderRadius: 20, height: 160,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        marginBottom: 20, border: "1px solid rgba(255,255,255,0.06)",
+        fontSize: 56,
       }}>
         {flipping ? "🌀" : result === "heads" ? "🟢" : result === "tails" ? "🔴" : "🪙"}
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button
-          onClick={() => setChoice("heads")}
-          style={{
-            flex: 1, padding: 14, borderRadius: 10,
-            border: choice === "heads" ? "1px solid #0ecb81" : "1px solid #2b3139",
-            background: choice === "heads" ? "rgba(14,203,129,0.15)" : "#1e2329",
-            color: "#eaecef", fontWeight: 600, cursor: "pointer"
-          }}
-        >
-          Heads
-        </button>
-        <button
-          onClick={() => setChoice("tails")}
-          style={{
-            flex: 1, padding: 14, borderRadius: 10,
-            border: choice === "tails" ? "1px solid #0ecb81" : "1px solid #2b3139",
-            background: choice === "tails" ? "rgba(14,203,129,0.15)" : "#1e2329",
-            color: "#eaecef", fontWeight: 600, cursor: "pointer"
-          }}
-        >
-          Tails
-        </button>
+        {(["heads", "tails"] as const).map((c) => (
+          <button
+            key={c} type="button" onClick={() => setChoice(c)}
+            style={{
+              flex: 1, padding: 14, borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer",
+              border: choice === c ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)",
+              background: choice === c ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.03)",
+              color: choice === c ? "#3b82f6" : "#e6edf3",
+              textTransform: "capitalize",
+            }}
+          >
+            {c}
+          </button>
+        ))}
       </div>
 
       <input
-        type="number"
-        value={betAmount}
+        type="number" value={betAmount}
         onChange={(e) => setBetAmount(Number(e.target.value))}
         style={{
-          width: "100%", padding: 14, borderRadius: 10, border: "1px solid #2b3139",
-          background: "#1e2329", color: "#eaecef", fontSize: 16, marginBottom: 12, boxSizing: "border-box"
+          width: "100%", padding: "14px 16px", borderRadius: 12, marginBottom: 14,
+          border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+          color: "#e6edf3", fontSize: 16, fontWeight: 600, outline: "none",
         }}
       />
 
       <button
-        onClick={flip}
+        type="button" onClick={flip}
         disabled={flipping || betAmount <= 0 || betAmount > balance}
         style={{
-          width: "100%", padding: 16, borderRadius: 12, border: "none",
-          background: "#0ecb81", color: "#000", fontWeight: 700, fontSize: 16,
-          cursor: flipping ? "not-allowed" : "pointer"
+          width: "100%", padding: 16, borderRadius: 14, border: "none",
+          background: flipping ? "#21262d" : "linear-gradient(135deg, #3b82f6, #2563eb)",
+          color: flipping ? "#6e7681" : "#fff",
+          fontWeight: 800, fontSize: 16,
+          cursor: flipping ? "not-allowed" : "pointer",
+          boxShadow: flipping ? "none" : "0 4px 20px rgba(59,130,246,0.3)",
         }}
       >
         {flipping ? "Flipping..." : `Flip • Win ₹${formatCoins(Math.floor(betAmount * 1.95))}`}

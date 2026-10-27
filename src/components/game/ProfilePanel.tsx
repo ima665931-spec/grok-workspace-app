@@ -1,5 +1,5 @@
-import { useGame } from "@/game/store";
-import { formatCoins } from "@/game/logic";
+import { useGame } from "../../game/store";
+import { formatCoins } from "../../game/logic";
 
 export function ProfilePanel() {
   const balance = useGame((s) => s.balance);
@@ -9,38 +9,38 @@ export function ProfilePanel() {
   const wins = history.filter((h) => h.won).length;
   const winRate = totalBets > 0 ? Math.round((wins / totalBets) * 100) : 0;
 
+  const cards = [
+    { label: "Balance", value: `₹${formatCoins(balance)}`, color: "#f0b90b" },
+    { label: "Total Bets", value: String(totalBets), color: "#e6edf3" },
+    { label: "Wins", value: String(wins), color: "#0ecb81" },
+    { label: "Win Rate", value: `${winRate}%`, color: "#3b82f6" },
+  ];
+
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20 }}>👤 Profile</h2>
+    <div style={{ padding: "16px 16px 24px" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 20px", letterSpacing: "-0.02em" }}>Profile</h2>
 
       <div style={{ textAlign: "center", marginBottom: 28 }}>
         <div style={{
-          width: 72, height: 72, borderRadius: "50%",
-          background: "#1e2329", border: "2px solid #f0b90b",
+          width: 72, height: 72, borderRadius: "50%", margin: "0 auto 12px",
+          background: "linear-gradient(135deg, #f0b90b, #fcd535)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 32, margin: "0 auto 12px"
-        }}>⚡</div>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>Player</div>
-        <div style={{ color: "#848e9c", fontSize: 13 }}>Demo Account</div>
+          fontSize: 28, fontWeight: 900, color: "#0a0c10",
+        }}>B</div>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Player</div>
+        <div style={{ color: "#6e7681", fontSize: 13, marginTop: 2 }}>Demo Account</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div style={{ background: "#1e2329", borderRadius: 12, padding: 16, border: "1px solid #2b3139" }}>
-          <div style={{ color: "#848e9c", fontSize: 12 }}>Balance</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#f0b90b" }}>₹{formatCoins(balance)}</div>
-        </div>
-        <div style={{ background: "#1e2329", borderRadius: 12, padding: 16, border: "1px solid #2b3139" }}>
-          <div style={{ color: "#848e9c", fontSize: 12 }}>Total Bets</div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{totalBets}</div>
-        </div>
-        <div style={{ background: "#1e2329", borderRadius: 12, padding: 16, border: "1px solid #2b3139" }}>
-          <div style={{ color: "#848e9c", fontSize: 12 }}>Wins</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#0ecb81" }}>{wins}</div>
-        </div>
-        <div style={{ background: "#1e2329", borderRadius: 12, padding: 16, border: "1px solid #2b3139" }}>
-          <div style={{ color: "#848e9c", fontSize: 12 }}>Win Rate</div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{winRate}%</div>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {cards.map((c) => (
+          <div key={c.label} style={{
+            background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: 16,
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ color: "#6e7681", fontSize: 12, marginBottom: 4, fontWeight: 500 }}>{c.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: c.color }}>{c.value}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useGame } from "@/game/store";
-import { formatCoins } from "@/game/logic";
+import { useGame } from "../../game/store";
+import { formatCoins } from "../../game/logic";
 
-const GRID = 25; // 5x5
+const GRID = 25;
 
 export function MinesGame() {
   const balance = useGame((s) => s.balance);
@@ -14,7 +14,6 @@ export function MinesGame() {
   const [revealed, setRevealed] = useState<number[]>([]);
   const [gameOver, setGameOver] = useState(false);
   const [started, setStarted] = useState(false);
-  const [won, setWon] = useState(false);
 
   const safeTiles = GRID - minesCount;
   const multiplier = Number((Math.pow(1.08, revealed.length) * (1 + minesCount * 0.15)).toFixed(2));
@@ -29,15 +28,12 @@ export function MinesGame() {
     setMinePositions(positions);
     setRevealed([]);
     setGameOver(false);
-    setWon(false);
     setStarted(true);
   };
 
   const reveal = (index: number) => {
     if (!started || gameOver || revealed.includes(index)) return;
-
     if (minePositions.includes(index)) {
-      // Hit mine
       setRevealed([...revealed, index]);
       setGameOver(true);
       setStarted(false);
@@ -46,8 +42,6 @@ export function MinesGame() {
       const newRevealed = [...revealed, index];
       setRevealed(newRevealed);
       if (newRevealed.length === safeTiles) {
-        // Cleared all
-        setWon(true);
         setGameOver(true);
         setStarted(false);
         placeBet("Mines", betAmount, multiplier, true);
@@ -57,26 +51,26 @@ export function MinesGame() {
 
   const cashOut = () => {
     if (!started || revealed.length === 0) return;
-    setWon(true);
     setGameOver(true);
     setStarted(false);
     placeBet("Mines", betAmount, multiplier, true);
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>💣 Mines</h2>
+    <div style={{ padding: "16px 16px 24px" }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 14px", letterSpacing: "-0.02em" }}>Mines</h2>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {[1, 3, 5, 10].map((n) => (
           <button
-            key={n}
+            key={n} type="button"
             onClick={() => !started && setMinesCount(n)}
             style={{
-              flex: 1, padding: 10, borderRadius: 8,
-              border: minesCount === n ? "1px solid #f0b90b" : "1px solid #2b3139",
-              background: minesCount === n ? "rgba(240,185,11,0.15)" : "#1e2329",
-              color: "#eaecef", fontWeight: 600, cursor: started ? "not-allowed" : "pointer"
+              flex: 1, padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 12,
+              cursor: started ? "not-allowed" : "pointer",
+              border: minesCount === n ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
+              background: minesCount === n ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.03)",
+              color: minesCount === n ? "#f0b90b" : "#e6edf3",
             }}
           >
             {n} Mines
@@ -84,30 +78,24 @@ export function MinesGame() {
         ))}
       </div>
 
-      {/* Grid */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(5, 1fr)",
-        gap: 6,
-        marginBottom: 16
-      }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 14 }}>
         {Array.from({ length: GRID }).map((_, i) => {
           const isRevealed = revealed.includes(i);
           const isMine = minePositions.includes(i);
           const showMine = (gameOver || isRevealed) && isMine;
-
           return (
             <button
-              key={i}
-              onClick={() => reveal(i)}
+              key={i} type="button" onClick={() => reveal(i)}
               style={{
-                aspectRatio: "1",
-                borderRadius: 8,
-                border: "none",
-                background: showMine ? "#f6465d" : isRevealed ? "#0ecb81" : "#1e2329",
+                aspectRatio: "1", borderRadius: 10, border: "none", fontSize: 16,
+                background: showMine
+                  ? "linear-gradient(135deg, #f6465d, #d93a4e)"
+                  : isRevealed
+                  ? "linear-gradient(135deg, #0ecb81, #0ba86a)"
+                  : "rgba(255,255,255,0.04)",
                 color: "#fff",
-                fontSize: 18,
-                cursor: started && !isRevealed ? "pointer" : "default"
+                cursor: started && !isRevealed ? "pointer" : "default",
+                boxShadow: isRevealed && !showMine ? "0 2px 8px rgba(14,203,129,0.25)" : "none",
               }}
             >
               {showMine ? "💣" : isRevealed ? "💎" : ""}
@@ -116,28 +104,30 @@ export function MinesGame() {
         })}
       </div>
 
-      <div style={{ textAlign: "center", marginBottom: 12, color: "#848e9c", fontSize: 13 }}>
-        Multiplier: <span style={{ color: "#f0b90b", fontWeight: 700 }}>{multiplier}x</span>
-        {revealed.length > 0 && ` • Safe: ${revealed.length}`}
+      <div style={{ textAlign: "center", marginBottom: 14, fontSize: 13, color: "#8b949e" }}>
+        Multiplier: <span style={{ color: "#f0b90b", fontWeight: 800 }}>{multiplier}x</span>
+        {revealed.length > 0 && `  ·  Safe: ${revealed.length}`}
       </div>
 
       {!started ? (
         <>
           <input
-            type="number"
-            value={betAmount}
+            type="number" value={betAmount}
             onChange={(e) => setBetAmount(Number(e.target.value))}
             style={{
-              width: "100%", padding: 14, borderRadius: 10, border: "1px solid #2b3139",
-              background: "#1e2329", color: "#eaecef", fontSize: 16, marginBottom: 12, boxSizing: "border-box"
+              width: "100%", padding: "14px 16px", borderRadius: 12, marginBottom: 12,
+              border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+              color: "#e6edf3", fontSize: 16, fontWeight: 600, outline: "none",
             }}
           />
           <button
-            onClick={startGame}
+            type="button" onClick={startGame}
             disabled={betAmount <= 0 || betAmount > balance}
             style={{
-              width: "100%", padding: 16, borderRadius: 12, border: "none",
-              background: "#0ecb81", color: "#000", fontWeight: 700, fontSize: 16, cursor: "pointer"
+              width: "100%", padding: 16, borderRadius: 14, border: "none",
+              background: "linear-gradient(135deg, #0ecb81, #0ba86a)",
+              color: "#fff", fontWeight: 800, fontSize: 16, cursor: "pointer",
+              boxShadow: "0 4px 20px rgba(14,203,129,0.3)",
             }}
           >
             Start Game • ₹{formatCoins(betAmount)}
@@ -145,11 +135,12 @@ export function MinesGame() {
         </>
       ) : (
         <button
-          onClick={cashOut}
-          disabled={revealed.length === 0}
+          type="button" onClick={cashOut} disabled={revealed.length === 0}
           style={{
-            width: "100%", padding: 16, borderRadius: 12, border: "none",
-            background: "#f0b90b", color: "#000", fontWeight: 700, fontSize: 16, cursor: "pointer"
+            width: "100%", padding: 16, borderRadius: 14, border: "none",
+            background: "linear-gradient(135deg, #f0b90b, #e5a800)",
+            color: "#0a0c10", fontWeight: 800, fontSize: 16, cursor: "pointer",
+            boxShadow: "0 4px 20px rgba(240,185,11,0.35)",
           }}
         >
           Cash Out ₹{formatCoins(Math.floor(betAmount * multiplier))}
