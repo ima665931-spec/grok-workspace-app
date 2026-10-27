@@ -1,5 +1,6 @@
 import { TrendingUp, Dices, Bomb, Coins, History, User } from "lucide-react";
-import { useGame } from "@/game/store";
+
+type Tab = "lobby" | "crash" | "dice" | "mines" | "coinflip" | "wallet" | "history" | "profile";
 
 const GAMES = [
   { id: "crash" as const, name: "Crash", desc: "Multiply & Cashout", icon: TrendingUp, color: "#f6465d" },
@@ -8,9 +9,7 @@ const GAMES = [
   { id: "coinflip" as const, name: "Coin Flip", desc: "Heads or Tails", icon: Coins, color: "#3b82f6" },
 ];
 
-export function Lobby() {
-  const setTab = useGame((s) => s.setTab);
-
+export function Lobby({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
   return (
     <div style={{ padding: 16 }}>
       <h2 style={{ fontSize: 20, fontWeight: 700, margin: "8px 0 16px" }}>Popular Games</h2>
@@ -21,7 +20,7 @@ export function Lobby() {
           return (
             <button
               key={g.id}
-              onClick={() => setTab(g.id)}
+              onClick={() => onNavigate(g.id)}
               style={{
                 background: "#1e2329",
                 border: "1px solid #2b3139",
@@ -44,7 +43,7 @@ export function Lobby() {
 
       <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 10 }}>
         <button
-          onClick={() => setTab("history")}
+          onClick={() => onNavigate("history")}
           style={{
             width: "100%",
             background: "#1e2329",
@@ -64,7 +63,7 @@ export function Lobby() {
         </button>
 
         <button
-          onClick={() => setTab("profile")}
+          onClick={() => onNavigate("profile")}
           style={{
             width: "100%",
             background: "#1e2329",
