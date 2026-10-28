@@ -15,25 +15,8 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-/** @type {Map<string, Room>} */
+/** @type {Map<string, any>} */
 const rooms = new Map();
-
-/**
- * @typedef {{ id: string, name: string, pos: number }}
- * Player
- * @typedef {{
- *  code: string,
- *  stake: number,
- *  goal: number,
- *  status: 'waiting' | 'playing' | 'finished',
- *  players: Player[],
- *  turn: number,
- *  winner: string | null,
- *  lastDice: number | null,
- *  hostId: string,
- * }}
- * Room
- */
 
 function code() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -59,7 +42,6 @@ io.on("connection", (socket) => {
   socket.on("create_room", ({ name, stake }, cb) => {
     const roomCode = code();
     const player = { id: socket.id, name: name || "Player", pos: 0 };
-    /** @type {Room} */
     const room = {
       code: roomCode,
       stake: Math.max(0, Number(stake) || 0),
@@ -70,10 +52,12 @@ io.on("connection", (socket) => {
       winner: null,
       lastDice: null,
       hostId: socket.id,
+      messages: [],
     };
     rooms.set(roomCode, room);
     socket.join(roomCode);
     socket.data.roomCode = roomCode;
+    socket.data.playerName = name || "Player";
     cb?.({ ok: true, room: publicRoom(room) });
   });
 
@@ -89,8 +73,42 @@ io.on("connection", (socket) => {
     room.players.push({ id: socket.id, name: name || "Player", pos: 0 });
     socket.join(key);
     socket.data.roomCode = key;
+    socket.data.playerName = name || "Player";
+
+    // system message
+    const joinMsg = {
+      id: Date.now().toString(36),
+      userId: "system",
+      name: "System",
+      text: `${name || "Player"} joined the room`,
+      time: Date.now(),
+      system: true,
+    };
+    room.messages = [...(room.messages || []), joinMsg].slice(-50);
+    io.to(key).emit("chat_message", joinMsg);
     io.to(key).emit("room_update", publicRoom(room));
     cb?.({ ok: true, room: publicRoom(room) });
+  });
+
+  socket.on("chat_message", ({ text }, cb) => {
+    const key = socket.data.roomCode;
+    const room = rooms.get(key);
+    if (!room) return cb?.({ ok: false, error: "Not in a room" });
+
+    const clean = String(text || "").trim().slice(0, 200);
+    if (!clean) return cb?.({ ok: false, error: "Empty message" });
+
+    const msg = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      userId: socket.id,
+      name: socket.data.playerName || "Player",
+      text: clean,
+      time: Date.now(),
+      system: false,
+    };
+    room.messages = [...(room.messages || []), msg].slice(-50);
+    io.to(key).emit("chat_message", msg);
+    cb?.({ ok: true });
   });
 
   socket.on("start_game", (cb) => {
@@ -105,6 +123,17 @@ io.on("connection", (socket) => {
     room.winner = null;
     room.lastDice = null;
     room.players.forEach((p) => (p.pos = 0));
+
+    const sys = {
+      id: Date.now().toString(36),
+      userId: "system",
+      name: "System",
+      text: "Game started! Good luck.",
+      time: Date.now(),
+      system: true,
+    };
+    room.messages = [...(room.messages || []), sys].slice(-50);
+    io.to(key).emit("chat_message", sys);
     io.to(key).emit("room_update", publicRoom(room));
     io.to(key).emit("game_started", publicRoom(room));
     cb?.({ ok: true });
@@ -126,6 +155,16 @@ io.on("connection", (socket) => {
     if (current.pos >= room.goal) {
       room.status = "finished";
       room.winner = current.id;
+      const sys = {
+        id: Date.now().toString(36),
+        userId: "system",
+        name: "System",
+        text: `${current.name} won the game!`,
+        time: Date.now(),
+        system: true,
+      };
+      room.messages = [...(room.messages || []), sys].slice(-50);
+      io.to(key).emit("chat_message", sys);
       io.to(key).emit("room_update", publicRoom(room));
       io.to(key).emit("game_over", { winnerId: current.id, room: publicRoom(room) });
       cb?.({ ok: true, dice });
@@ -152,6 +191,7 @@ function leaveRoom(socket) {
   const room = rooms.get(key);
   if (!room) return;
 
+  const leavingName = socket.data.playerName || "Player";
   room.players = room.players.filter((p) => p.id !== socket.id);
   socket.leave(key);
   socket.data.roomCode = null;
@@ -160,6 +200,17 @@ function leaveRoom(socket) {
     rooms.delete(key);
     return;
   }
+
+  const leaveMsg = {
+    id: Date.now().toString(36),
+    userId: "system",
+    name: "System",
+    text: `${leavingName} left the room`,
+    time: Date.now(),
+    system: true,
+  };
+  room.messages = [...(room.messages || []), leaveMsg].slice(-50);
+  io.to(key).emit("chat_message", leaveMsg);
 
   if (room.hostId === socket.id) {
     room.hostId = room.players[0].id;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getSocket, getSocketUrl } from "../../lib/socket";
 import { useAuth } from "../../game/auth";
 import { useGame } from "../../game/store";
@@ -16,6 +16,15 @@ type Room = {
   hostId: string;
 };
 
+type ChatMsg = {
+  id: string;
+  userId: string;
+  name: string;
+  text: string;
+  time: number;
+  system?: boolean;
+};
+
 export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const user = useAuth((s) => s.user);
   const balance = useGame((s) => s.balance);
@@ -30,6 +39,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const [room, setRoom] = useState<Room | null>(null);
   const [myId, setMyId] = useState("");
   const [rolling, setRolling] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [showChat, setShowChat] = useState(true);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     const s = getSocket();
@@ -41,10 +58,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     const onDisconnect = () => setConnected(false);
     const onUpdate = (r: Room) => setRoom(r);
     const onStarted = (r: Room) => setRoom(r);
+    const onChat = (msg: ChatMsg) => {
+      setMessages((prev) => [...prev, msg].slice(-80));
+    };
     const onOver = ({ room: r, winnerId }: { room: Room; winnerId: string }) => {
       setRoom(r);
       if (!r) return;
-      // settle only once for local player
       if (winnerId === s.id) {
         const payout = Math.floor((r.stake || 0) * 1.9);
         if (payout > 0) {
@@ -61,6 +80,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     s.on("room_update", onUpdate);
     s.on("game_started", onStarted);
     s.on("game_over", onOver);
+    s.on("chat_message", onChat);
 
     if (!s.connected) s.connect();
     else onConnect();
@@ -71,6 +91,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       s.off("room_update", onUpdate);
       s.off("game_started", onStarted);
       s.off("game_over", onOver);
+      s.off("chat_message", onChat);
     };
   }, [creditWin, recordBet]);
 
@@ -78,6 +99,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
   const createRoom = () => {
     setError("");
+    setMessages([]);
     if (stake > 0 && stake > balance) {
       setError("Insufficient balance");
       return;
@@ -90,17 +112,28 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     if (!s.connected) s.connect();
     s.emit("create_room", { name, stake }, (res: any) => {
       if (!res?.ok) {
-        if (stake > 0) creditWin(stake); // refund
+        if (stake > 0) creditWin(stake);
         setError(res?.error || "Create failed");
         return;
       }
       setRoom(res.room);
       setMyId(s.id || "");
+      setMessages([
+        {
+          id: "welcome",
+          userId: "system",
+          name: "System",
+          text: "Room created. Share the code with friends.",
+          time: Date.now(),
+          system: true,
+        },
+      ]);
     });
   };
 
   const joinRoom = () => {
     setError("");
+    setMessages([]);
     const s = getSocket();
     if (!s.connected) s.connect();
     s.emit("join_room", { code: joinCode.trim(), name }, (res: any) => {
@@ -109,7 +142,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         return;
       }
       const r = res.room as Room;
-      // lock stake matching room
       if (r.stake > 0) {
         if (r.stake > balance || !tryPlaceStake(r.stake)) {
           setError("Need ₹" + r.stake + " to join");
@@ -137,9 +169,19 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     });
   };
 
+  const sendChat = () => {
+    const text = chatText.trim();
+    if (!text) return;
+    setChatText("");
+    getSocket().emit("chat_message", { text }, (res: any) => {
+      if (!res?.ok) setError(res?.error || "Chat failed");
+    });
+  };
+
   const leave = () => {
     getSocket().emit("leave_room");
     setRoom(null);
+    setMessages([]);
     onBack();
   };
 
@@ -156,10 +198,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         <button type="button" onClick={leave} style={link}>← Back</button>
       </div>
 
-      <div style={{
-        fontSize: 12, marginBottom: 12, color: connected ? "#0ecb81" : "#f6465d",
-      }}>
-        {connected ? "● Connected" : "● Connecting..."} · {getSocketUrl()}
+      <div style={{ fontSize: 12, marginBottom: 12, color: connected ? "#0ecb81" : "#f6465d" }}>
+        {connected ? "● Connected" : "● Connecting..."}
       </div>
 
       {error && (
@@ -190,79 +230,157 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
             />
             <button type="button" onClick={joinRoom} style={primary}>Join</button>
           </div>
-
-          <p style={{ color: "#6e7681", fontSize: 11, marginTop: 14, lineHeight: 1.5 }}>
-            Share room code with friend. Host starts when 2+ players join.
-            Dice is server-side (fair).
-          </p>
         </>
       )}
 
       {room && (
-        <div style={card}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 12, color: "#8b949e" }}>Room</div>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 2 }}>{room.code}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 12, color: "#8b949e" }}>Stake</div>
-              <div style={{ fontWeight: 800, color: "#f0b90b" }}>
-                {room.stake ? `₹${formatCoins(room.stake)}` : "Free"}
+        <>
+          <div style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "#8b949e" }}>Room</div>
+                <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 2 }}>{room.code}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, color: "#8b949e" }}>Stake</div>
+                <div style={{ fontWeight: 800, color: "#f0b90b" }}>
+                  {room.stake ? `₹${formatCoins(room.stake)}` : "Free"}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div style={{ marginBottom: 12 }}>
-            {room.players.map((p, i) => (
-              <div key={p.id} style={{
-                display: "flex", justifyContent: "space-between", padding: "8px 0",
-                borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 14,
+            <div style={{ marginBottom: 12 }}>
+              {room.players.map((p) => (
+                <div key={p.id} style={{
+                  display: "flex", justifyContent: "space-between", padding: "8px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 14,
+                }}>
+                  <span>
+                    {p.id === myId ? "You" : p.name}
+                    {p.id === room.hostId ? " 👑" : ""}
+                    {room.status === "playing" && room.players[room.turn]?.id === p.id ? " ← turn" : ""}
+                  </span>
+                  <span style={{ fontWeight: 800, color: p.id === myId ? "#0ecb81" : "#e6edf3" }}>
+                    {p.pos}/{room.goal}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {room.lastDice != null && (
+              <div style={{ textAlign: "center", fontSize: 32, fontWeight: 900, marginBottom: 10 }}>
+                🎲 {room.lastDice}
+              </div>
+            )}
+
+            {room.status === "waiting" && isHost && (
+              <button type="button" onClick={startGame} style={primary} disabled={room.players.length < 2}>
+                {room.players.length < 2 ? "Waiting for players..." : "Start Game"}
+              </button>
+            )}
+            {room.status === "waiting" && !isHost && (
+              <div style={{ textAlign: "center", color: "#8b949e", fontSize: 13 }}>Waiting for host...</div>
+            )}
+            {room.status === "playing" && (
+              <button type="button" onClick={roll} disabled={!myTurn || rolling} style={primary}>
+                {!myTurn ? "Opponent turn" : rolling ? "Rolling..." : "Roll Dice"}
+              </button>
+            )}
+            {room.status === "finished" && (
+              <div style={{
+                textAlign: "center", fontWeight: 800, fontSize: 16,
+                color: room.winner === myId ? "#0ecb81" : "#f6465d",
               }}>
-                <span>
-                  {p.id === myId ? "You" : p.name}
-                  {p.id === room.hostId ? " 👑" : ""}
-                  {room.status === "playing" && room.players[room.turn]?.id === p.id ? " ← turn" : ""}
-                </span>
-                <span style={{ fontWeight: 800, color: p.id === myId ? "#0ecb81" : "#e6edf3" }}>
-                  {p.pos}/{room.goal}
-                </span>
+                {room.winner === myId ? "You won!" : "You lost"}
               </div>
-            ))}
+            )}
           </div>
 
-          {room.lastDice != null && (
-            <div style={{ textAlign: "center", fontSize: 32, fontWeight: 900, marginBottom: 10 }}>
-              🎲 {room.lastDice}
-            </div>
-          )}
-
-          {room.status === "waiting" && isHost && (
-            <button type="button" onClick={startGame} style={primary}
-              disabled={room.players.length < 2}>
-              {room.players.length < 2 ? "Waiting for players..." : "Start Game"}
+          {/* Chat */}
+          <div style={{ ...card, marginTop: 12, padding: 0, overflow: "hidden" }}>
+            <button
+              type="button"
+              onClick={() => setShowChat((v) => !v)}
+              style={{
+                width: "100%", padding: "12px 16px", border: "none",
+                background: "rgba(255,255,255,0.03)", color: "#e6edf3",
+                fontWeight: 700, fontSize: 14, cursor: "pointer",
+                display: "flex", justifyContent: "space-between",
+              }}
+            >
+              <span>💬 Room Chat</span>
+              <span style={{ color: "#6e7681" }}>{showChat ? "Hide" : "Show"}</span>
             </button>
-          )}
 
-          {room.status === "waiting" && !isHost && (
-            <div style={{ textAlign: "center", color: "#8b949e", fontSize: 13 }}>Waiting for host...</div>
-          )}
+            {showChat && (
+              <>
+                <div style={{
+                  height: 180, overflowY: "auto", padding: "8px 12px",
+                  borderTop: "1px solid rgba(255,255,255,0.06)",
+                }}>
+                  {messages.length === 0 && (
+                    <div style={{ color: "#6e7681", fontSize: 12, textAlign: "center", padding: 20 }}>
+                      No messages yet
+                    </div>
+                  )}
+                  {messages.map((m) => (
+                    <div key={m.id} style={{ marginBottom: 8 }}>
+                      {m.system ? (
+                        <div style={{ textAlign: "center", fontSize: 11, color: "#6e7681" }}>
+                          {m.text}
+                        </div>
+                      ) : (
+                        <div style={{
+                          display: "flex", flexDirection: "column",
+                          alignItems: m.userId === myId ? "flex-end" : "flex-start",
+                        }}>
+                          <span style={{ fontSize: 10, color: "#8b949e", marginBottom: 2 }}>
+                            {m.userId === myId ? "You" : m.name}
+                          </span>
+                          <span style={{
+                            maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
+                            fontSize: 13, fontWeight: 500,
+                            background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
+                            color: "#e6edf3",
+                          }}>
+                            {m.text}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
 
-          {room.status === "playing" && (
-            <button type="button" onClick={roll} disabled={!myTurn || rolling} style={primary}>
-              {!myTurn ? "Opponent turn" : rolling ? "Rolling..." : "Roll Dice"}
-            </button>
-          )}
-
-          {room.status === "finished" && (
-            <div style={{
-              textAlign: "center", fontWeight: 800, fontSize: 16,
-              color: room.winner === myId ? "#0ecb81" : "#f6465d",
-            }}>
-              {room.winner === myId ? "You won!" : "You lost"}
-            </div>
-          )}
-        </div>
+                <div style={{
+                  display: "flex", gap: 8, padding: 10,
+                  borderTop: "1px solid rgba(255,255,255,0.06)",
+                }}>
+                  <input
+                    value={chatText}
+                    onChange={(e) => setChatText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && sendChat()}
+                    placeholder="Type a message..."
+                    maxLength={200}
+                    style={{
+                      flex: 1, padding: "10px 12px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      background: "rgba(255,255,255,0.04)", color: "#e6edf3",
+                      fontSize: 14, outline: "none",
+                    }}
+                  />
+                  <button type="button" onClick={sendChat} style={{
+                    padding: "10px 16px", borderRadius: 10, border: "none",
+                    background: "#0ecb81", color: "#fff", fontWeight: 700,
+                    fontSize: 13, cursor: "pointer",
+                  }}>
+                    Send
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
