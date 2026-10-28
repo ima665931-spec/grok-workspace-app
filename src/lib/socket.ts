@@ -1,6 +1,9 @@
 import { io, Socket } from "socket.io-client";
 
-const URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:3001";
+// Production multiplayer server (Render)
+const URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  "https://grok-workspace-app.onrender.com";
 
 let socket: Socket | null = null;
 
