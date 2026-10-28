@@ -22,18 +22,35 @@ function code() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function publicRoom(room) {
+/** Full public snapshot for realtime sync */
+function snapshot(room) {
   return {
     code: room.code,
     stake: room.stake,
     goal: room.goal,
     status: room.status,
-    players: room.players,
+    players: room.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      pos: p.pos,
+    })),
     turn: room.turn,
+    turnPlayerId: room.players[room.turn]?.id || null,
     winner: room.winner,
     lastDice: room.lastDice,
     hostId: room.hostId,
+    messages: (room.messages || []).slice(-40),
+    updatedAt: Date.now(),
   };
+}
+
+function broadcastState(roomCode, event = "game_state") {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+  const state = snapshot(room);
+  io.to(roomCode).emit(event, state);
+  // also keep legacy listeners working
+  io.to(roomCode).emit("room_update", state);
 }
 
 io.on("connection", (socket) => {
@@ -52,13 +69,24 @@ io.on("connection", (socket) => {
       winner: null,
       lastDice: null,
       hostId: socket.id,
-      messages: [],
+      messages: [
+        {
+          id: "welcome",
+          userId: "system",
+          name: "System",
+          text: "Room created. Share the code with friends.",
+          time: Date.now(),
+          system: true,
+        },
+      ],
     };
     rooms.set(roomCode, room);
     socket.join(roomCode);
     socket.data.roomCode = roomCode;
     socket.data.playerName = name || "Player";
-    cb?.({ ok: true, room: publicRoom(room) });
+    const state = snapshot(room);
+    cb?.({ ok: true, room: state });
+    socket.emit("game_state", state);
   });
 
   socket.on("join_room", ({ code: roomCode, name }, cb) => {
@@ -67,27 +95,41 @@ io.on("connection", (socket) => {
     if (!room) return cb?.({ ok: false, error: "Room not found" });
     if (room.status !== "waiting") return cb?.({ ok: false, error: "Game already started" });
     if (room.players.length >= 4) return cb?.({ ok: false, error: "Room full" });
-    if (room.players.some((p) => p.id === socket.id))
-      return cb?.({ ok: true, room: publicRoom(room) });
 
-    room.players.push({ id: socket.id, name: name || "Player", pos: 0 });
+    if (!room.players.some((p) => p.id === socket.id)) {
+      room.players.push({ id: socket.id, name: name || "Player", pos: 0 });
+      room.messages = [
+        ...(room.messages || []),
+        {
+          id: Date.now().toString(36),
+          userId: "system",
+          name: "System",
+          text: `${name || "Player"} joined the room`,
+          time: Date.now(),
+          system: true,
+        },
+      ].slice(-50);
+    }
+
     socket.join(key);
     socket.data.roomCode = key;
     socket.data.playerName = name || "Player";
 
-    // system message
-    const joinMsg = {
-      id: Date.now().toString(36),
-      userId: "system",
-      name: "System",
-      text: `${name || "Player"} joined the room`,
-      time: Date.now(),
-      system: true,
-    };
-    room.messages = [...(room.messages || []), joinMsg].slice(-50);
-    io.to(key).emit("chat_message", joinMsg);
-    io.to(key).emit("room_update", publicRoom(room));
-    cb?.({ ok: true, room: publicRoom(room) });
+    const state = snapshot(room);
+    cb?.({ ok: true, room: state });
+    // full sync to joiner + everyone
+    socket.emit("game_state", state);
+    broadcastState(key);
+  });
+
+  /** Client can request full sync anytime (reconnect / tab focus) */
+  socket.on("request_sync", (cb) => {
+    const key = socket.data.roomCode;
+    const room = rooms.get(key);
+    if (!room) return cb?.({ ok: false, error: "Not in a room" });
+    const state = snapshot(room);
+    socket.emit("game_state", state);
+    cb?.({ ok: true, room: state });
   });
 
   socket.on("chat_message", ({ text }, cb) => {
@@ -108,6 +150,7 @@ io.on("connection", (socket) => {
     };
     room.messages = [...(room.messages || []), msg].slice(-50);
     io.to(key).emit("chat_message", msg);
+    // light state touch so late joiners stay consistent on next sync
     cb?.({ ok: true });
   });
 
@@ -123,19 +166,20 @@ io.on("connection", (socket) => {
     room.winner = null;
     room.lastDice = null;
     room.players.forEach((p) => (p.pos = 0));
+    room.messages = [
+      ...(room.messages || []),
+      {
+        id: Date.now().toString(36),
+        userId: "system",
+        name: "System",
+        text: "Game started! Good luck.",
+        time: Date.now(),
+        system: true,
+      },
+    ].slice(-50);
 
-    const sys = {
-      id: Date.now().toString(36),
-      userId: "system",
-      name: "System",
-      text: "Game started! Good luck.",
-      time: Date.now(),
-      system: true,
-    };
-    room.messages = [...(room.messages || []), sys].slice(-50);
-    io.to(key).emit("chat_message", sys);
-    io.to(key).emit("room_update", publicRoom(room));
-    io.to(key).emit("game_started", publicRoom(room));
+    broadcastState(key);
+    io.to(key).emit("game_started", snapshot(room));
     cb?.({ ok: true });
   });
 
@@ -152,28 +196,39 @@ io.on("connection", (socket) => {
     room.lastDice = dice;
     current.pos = Math.min(room.goal, current.pos + dice);
 
+    // announce roll in chat for clarity
+    room.messages = [
+      ...(room.messages || []),
+      {
+        id: Date.now().toString(36),
+        userId: "system",
+        name: "System",
+        text: `${current.name} rolled ${dice} → ${current.pos}`,
+        time: Date.now(),
+        system: true,
+      },
+    ].slice(-50);
+
     if (current.pos >= room.goal) {
       room.status = "finished";
       room.winner = current.id;
-      const sys = {
-        id: Date.now().toString(36),
+      room.messages.push({
+        id: Date.now().toString(36) + "w",
         userId: "system",
         name: "System",
         text: `${current.name} won the game!`,
         time: Date.now(),
         system: true,
-      };
-      room.messages = [...(room.messages || []), sys].slice(-50);
-      io.to(key).emit("chat_message", sys);
-      io.to(key).emit("room_update", publicRoom(room));
-      io.to(key).emit("game_over", { winnerId: current.id, room: publicRoom(room) });
-      cb?.({ ok: true, dice });
+      });
+      broadcastState(key);
+      io.to(key).emit("game_over", { winnerId: current.id, room: snapshot(room) });
+      cb?.({ ok: true, dice, state: snapshot(room) });
       return;
     }
 
     room.turn = (room.turn + 1) % room.players.length;
-    io.to(key).emit("room_update", publicRoom(room));
-    cb?.({ ok: true, dice });
+    broadcastState(key);
+    cb?.({ ok: true, dice, state: snapshot(room) });
   });
 
   socket.on("leave_room", () => {
@@ -201,16 +256,17 @@ function leaveRoom(socket) {
     return;
   }
 
-  const leaveMsg = {
-    id: Date.now().toString(36),
-    userId: "system",
-    name: "System",
-    text: `${leavingName} left the room`,
-    time: Date.now(),
-    system: true,
-  };
-  room.messages = [...(room.messages || []), leaveMsg].slice(-50);
-  io.to(key).emit("chat_message", leaveMsg);
+  room.messages = [
+    ...(room.messages || []),
+    {
+      id: Date.now().toString(36),
+      userId: "system",
+      name: "System",
+      text: `${leavingName} left the room`,
+      time: Date.now(),
+      system: true,
+    },
+  ].slice(-50);
 
   if (room.hostId === socket.id) {
     room.hostId = room.players[0].id;
@@ -220,10 +276,10 @@ function leaveRoom(socket) {
   if (room.status === "playing" && room.players.length < 2) {
     room.status = "finished";
     room.winner = room.players[0]?.id || null;
-    io.to(key).emit("game_over", { winnerId: room.winner, room: publicRoom(room) });
+    io.to(key).emit("game_over", { winnerId: room.winner, room: snapshot(room) });
   }
 
-  io.to(key).emit("room_update", publicRoom(room));
+  broadcastState(key);
 }
 
 const PORT = process.env.PORT || 3001;

@@ -1,19 +1,24 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { getSocket, getSocketUrl } from "../../lib/socket";
 import { useAuth } from "../../game/auth";
 import { useGame } from "../../game/store";
 import { formatCoins } from "../../game/logic";
 
-type Room = {
+type Player = { id: string; name: string; pos: number };
+
+type GameState = {
   code: string;
   stake: number;
   goal: number;
   status: "waiting" | "playing" | "finished";
-  players: { id: string; name: string; pos: number }[];
+  players: Player[];
   turn: number;
+  turnPlayerId?: string | null;
   winner: string | null;
   lastDice: number | null;
   hostId: string;
+  messages?: ChatMsg[];
+  updatedAt?: number;
 };
 
 type ChatMsg = {
@@ -36,13 +41,24 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [stake, setStake] = useState(100);
-  const [room, setRoom] = useState<Room | null>(null);
+  const [room, setRoom] = useState<GameState | null>(null);
   const [myId, setMyId] = useState("");
   const [rolling, setRolling] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [chatText, setChatText] = useState("");
   const [showChat, setShowChat] = useState(true);
+  const [lastSync, setLastSync] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const settledRef = useRef<string | null>(null);
+
+  const applyState = useCallback((state: GameState) => {
+    if (!state) return;
+    setRoom(state);
+    if (state.messages) {
+      setMessages(state.messages);
+    }
+    if (state.updatedAt) setLastSync(state.updatedAt);
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,20 +66,34 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const s = getSocket();
+
     const onConnect = () => {
       setConnected(true);
       setMyId(s.id || "");
       setError("");
+      // re-sync if we think we're in a room
+      s.emit("request_sync", (res: any) => {
+        if (res?.ok && res.room) applyState(res.room);
+      });
     };
+
     const onDisconnect = () => setConnected(false);
-    const onUpdate = (r: Room) => setRoom(r);
-    const onStarted = (r: Room) => setRoom(r);
-    const onChat = (msg: ChatMsg) => {
-      setMessages((prev) => [...prev, msg].slice(-80));
+
+    const onGameState = (state: GameState) => {
+      applyState(state);
     };
-    const onOver = ({ room: r, winnerId }: { room: Room; winnerId: string }) => {
-      setRoom(r);
-      if (!r) return;
+
+    const onChat = (msg: ChatMsg) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg].slice(-80);
+      });
+    };
+
+    const onOver = ({ room: r, winnerId }: { room: GameState; winnerId: string }) => {
+      applyState(r);
+      if (!r || settledRef.current === r.code + winnerId) return;
+      settledRef.current = r.code + winnerId;
       if (winnerId === s.id) {
         const payout = Math.floor((r.stake || 0) * 1.9);
         if (payout > 0) {
@@ -77,10 +107,26 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);
-    s.on("room_update", onUpdate);
-    s.on("game_started", onStarted);
+    s.on("game_state", onGameState);
+    s.on("room_update", onGameState);
+    s.on("game_started", onGameState);
     s.on("game_over", onOver);
     s.on("chat_message", onChat);
+
+    // visibility / focus → force sync
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && s.connected) {
+        s.emit("request_sync");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    // periodic light sync while in session
+    const interval = window.setInterval(() => {
+      if (s.connected && s.data) {
+        s.emit("request_sync");
+      }
+    }, 8000);
 
     if (!s.connected) s.connect();
     else onConnect();
@@ -88,18 +134,22 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     return () => {
       s.off("connect", onConnect);
       s.off("disconnect", onDisconnect);
-      s.off("room_update", onUpdate);
-      s.off("game_started", onStarted);
+      s.off("game_state", onGameState);
+      s.off("room_update", onGameState);
+      s.off("game_started", onGameState);
       s.off("game_over", onOver);
       s.off("chat_message", onChat);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(interval);
     };
-  }, [creditWin, recordBet]);
+  }, [applyState, creditWin, recordBet]);
 
   const name = user?.name || "Player";
 
   const createRoom = () => {
     setError("");
     setMessages([]);
+    settledRef.current = null;
     if (stake > 0 && stake > balance) {
       setError("Insufficient balance");
       return;
@@ -116,24 +166,15 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         setError(res?.error || "Create failed");
         return;
       }
-      setRoom(res.room);
       setMyId(s.id || "");
-      setMessages([
-        {
-          id: "welcome",
-          userId: "system",
-          name: "System",
-          text: "Room created. Share the code with friends.",
-          time: Date.now(),
-          system: true,
-        },
-      ]);
+      applyState(res.room);
     });
   };
 
   const joinRoom = () => {
     setError("");
     setMessages([]);
+    settledRef.current = null;
     const s = getSocket();
     if (!s.connected) s.connect();
     s.emit("join_room", { code: joinCode.trim(), name }, (res: any) => {
@@ -141,7 +182,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         setError(res?.error || "Join failed");
         return;
       }
-      const r = res.room as Room;
+      const r = res.room as GameState;
       if (r.stake > 0) {
         if (r.stake > balance || !tryPlaceStake(r.stake)) {
           setError("Need ₹" + r.stake + " to join");
@@ -149,8 +190,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
           return;
         }
       }
-      setRoom(r);
       setMyId(s.id || "");
+      applyState(r);
     });
   };
 
@@ -166,6 +207,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     getSocket().emit("roll_dice", (res: any) => {
       setRolling(false);
       if (!res?.ok) setError(res?.error || "Roll failed");
+      if (res?.state) applyState(res.state);
     });
   };
 
@@ -178,6 +220,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     });
   };
 
+  const forceSync = () => {
+    getSocket().emit("request_sync", (res: any) => {
+      if (res?.ok && res.room) applyState(res.room);
+    });
+  };
+
   const leave = () => {
     getSocket().emit("leave_room");
     setRoom(null);
@@ -186,10 +234,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   };
 
   const isHost = room && room.hostId === myId;
-  const myTurn =
-    room &&
-    room.status === "playing" &&
-    room.players[room.turn]?.id === myId;
+  const turnId = room?.turnPlayerId || room?.players[room?.turn ?? 0]?.id;
+  const myTurn = room && room.status === "playing" && turnId === myId;
 
   return (
     <div style={{ padding: "16px 16px 24px" }}>
@@ -198,8 +244,15 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         <button type="button" onClick={leave} style={link}>← Back</button>
       </div>
 
-      <div style={{ fontSize: 12, marginBottom: 12, color: connected ? "#0ecb81" : "#f6465d" }}>
-        {connected ? "● Connected" : "● Connecting..."}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: connected ? "#0ecb81" : "#f6465d" }}>
+          {connected ? "● Live sync" : "● Reconnecting..."}
+        </div>
+        {room && (
+          <button type="button" onClick={forceSync} style={{ ...link, fontSize: 11 }}>
+            ↻ Sync
+          </button>
+        )}
       </div>
 
       {error && (
@@ -249,26 +302,36 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              {room.players.map((p) => (
-                <div key={p.id} style={{
-                  display: "flex", justifyContent: "space-between", padding: "8px 0",
-                  borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 14,
-                }}>
-                  <span>
-                    {p.id === myId ? "You" : p.name}
-                    {p.id === room.hostId ? " 👑" : ""}
-                    {room.status === "playing" && room.players[room.turn]?.id === p.id ? " ← turn" : ""}
-                  </span>
-                  <span style={{ fontWeight: 800, color: p.id === myId ? "#0ecb81" : "#e6edf3" }}>
-                    {p.pos}/{room.goal}
-                  </span>
-                </div>
-              ))}
+            {/* Progress bars — realtime positions */}
+            <div style={{ marginBottom: 14 }}>
+              {room.players.map((p) => {
+                const pct = Math.min(100, (p.pos / room.goal) * 100);
+                const isMe = p.id === myId;
+                const isTurn = turnId === p.id && room.status === "playing";
+                return (
+                  <div key={p.id} style={{ marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700, color: isMe ? "#0ecb81" : "#e6edf3" }}>
+                        {isMe ? "You" : p.name}
+                        {p.id === room.hostId ? " 👑" : ""}
+                        {isTurn ? " ← turn" : ""}
+                      </span>
+                      <span style={{ fontWeight: 800 }}>{p.pos}/{room.goal}</span>
+                    </div>
+                    <div style={{ height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 6, overflow: "hidden" }}>
+                      <div style={{
+                        width: `${pct}%`, height: "100%", borderRadius: 6,
+                        background: isMe ? "#0ecb81" : "#3b82f6",
+                        transition: "width 0.35s ease",
+                      }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {room.lastDice != null && (
-              <div style={{ textAlign: "center", fontSize: 32, fontWeight: 900, marginBottom: 10 }}>
+              <div style={{ textAlign: "center", fontSize: 36, fontWeight: 900, marginBottom: 10 }}>
                 🎲 {room.lastDice}
               </div>
             )}
@@ -292,6 +355,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                 color: room.winner === myId ? "#0ecb81" : "#f6465d",
               }}>
                 {room.winner === myId ? "You won!" : "You lost"}
+              </div>
+            )}
+
+            {lastSync > 0 && (
+              <div style={{ textAlign: "center", fontSize: 10, color: "#6e7681", marginTop: 8 }}>
+                Synced {new Date(lastSync).toLocaleTimeString()}
               </div>
             )}
           </div>
@@ -326,9 +395,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                   {messages.map((m) => (
                     <div key={m.id} style={{ marginBottom: 8 }}>
                       {m.system ? (
-                        <div style={{ textAlign: "center", fontSize: 11, color: "#6e7681" }}>
-                          {m.text}
-                        </div>
+                        <div style={{ textAlign: "center", fontSize: 11, color: "#6e7681" }}>{m.text}</div>
                       ) : (
                         <div style={{
                           display: "flex", flexDirection: "column",
@@ -337,12 +404,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                           <span style={{ fontSize: 10, color: "#8b949e", marginBottom: 2 }}>
                             {m.userId === myId ? "You" : m.name}
                           </span>
-                          <span style={{
-                            maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
-                            fontSize: 13, fontWeight: 500,
-                            background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
-                            color: "#e6edf3",
-                          }}>
+                          <span style={
+                            {
+                              maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
+                              fontSize: 13, fontWeight: 500,
+                              background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
+                              color: "#e6edf3",
+                            }
+                          }>
                             {m.text}
                           </span>
                         </div>
