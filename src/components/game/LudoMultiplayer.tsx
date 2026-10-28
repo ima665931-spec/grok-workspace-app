@@ -32,14 +32,14 @@ type ChatMsg = {
   system?: boolean;
 };
 
-function waitForConnect(maxMs = 25000): Promise<boolean> {
+function waitForConnect(maxMs = 30000): Promise<boolean> {
   const s = getSocket();
   if (s.connected) return Promise.resolve(true);
-  if (!s.connected) s.connect();
+  s.connect();
   return new Promise((resolve) => {
     const t = setTimeout(() => {
       s.off("connect", onOk);
-      resolve(s.connected);
+      resolve(!!s.connected);
     }, maxMs);
     const onOk = () => {
       clearTimeout(t);
@@ -71,10 +71,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<"create" | "join">("create");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const settledRef = useRef<string | null>(null);
+  const inRoomRef = useRef(false);
 
   const applyState = useCallback((state: GameState) => {
     if (!state) return;
     setRoom(state);
+    inRoomRef.current = true;
     if (state.messages) setMessages(state.messages);
     if (state.updatedAt) setLastSync(state.updatedAt);
   }, []);
@@ -91,12 +93,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   } = useSocket({
     onConnect: (s) => {
       setMyId(s.id || "");
-      setLocalError("");
-      safeEmit("request_sync", {}, (res: any) => {
-        if (res?.ok && res.room) applyState(res.room);
-      });
+      // Only sync if already in a room
+      if (inRoomRef.current) {
+        safeEmit("request_sync", {}, (res: any) => {
+          if (res?.ok && res.room) applyState(res.room);
+        });
+      }
     },
-    syncIntervalMs: 10000,
+    syncIntervalMs: 12000,
   });
 
   useEffect(() => {
@@ -166,35 +170,48 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     }
 
     setBusy(true);
-    const ok = await waitForConnect(25000);
-    if (!ok) {
-      setBusy(false);
-      setLocalError("Server is offline or waking up. Wait 30s and retry.");
-      return;
-    }
 
-    if (stake > 0 && !tryPlaceStake(stake)) {
-      setBusy(false);
-      setLocalError("Could not lock stake");
-      return;
-    }
-
-    safeEmit(
-      "create_room",
-      { name, stake },
-      (res: any) => {
+    try {
+      const ok = await waitForConnect(30000);
+      if (!ok) {
+        setLocalError("Cannot reach server. Open render.com and make sure service is Live.");
         setBusy(false);
-        if (!res?.ok) {
-          if (stake > 0) creditWin(stake);
-          setLocalError(res?.error || "Failed to create room");
-          return;
-        }
-        setMyId(socket.id || "");
-        applyState(res.room);
-        setPendingRejoin(res.room.code, name, res.playerToken);
-      },
-      20000
-    );
+        return;
+      }
+
+      // Lock stake only after we know server is up
+      if (stake > 0 && !tryPlaceStake(stake)) {
+        setLocalError("Could not lock stake");
+        setBusy(false);
+        return;
+      }
+
+      safeEmit(
+        "create_room",
+        { name, stake },
+        (res: any) => {
+          setBusy(false);
+          console.log("[create_room] response", res);
+          if (!res?.ok) {
+            if (stake > 0) creditWin(stake);
+            setLocalError(res?.error || "Failed to create room");
+            return;
+          }
+          if (!res.room) {
+            if (stake > 0) creditWin(stake);
+            setLocalError("Invalid server response");
+            return;
+          }
+          setMyId(getSocket().id || "");
+          applyState(res.room);
+          setPendingRejoin(res.room.code, name, res.playerToken);
+        },
+        20000
+      );
+    } catch (e: any) {
+      setBusy(false);
+      setLocalError(e?.message || "Create room failed");
+    }
   };
 
   const joinRoom = async () => {
@@ -209,10 +226,10 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     }
 
     setBusy(true);
-    const ok = await waitForConnect(25000);
+    const ok = await waitForConnect(30000);
     if (!ok) {
       setBusy(false);
-      setLocalError("Server is offline or waking up. Wait 30s and retry.");
+      setLocalError("Cannot reach server. Make sure Render service is Live.");
       return;
     }
 
@@ -233,7 +250,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
             return;
           }
         }
-        setMyId(socket.id || "");
+        setMyId(getSocket().id || "");
         applyState(r);
         setPendingRejoin(r.code, name, res.playerToken);
       },
@@ -280,6 +297,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
   const leave = () => {
     setPendingRejoin(null);
+    inRoomRef.current = false;
     safeEmit("leave_room");
     setRoom(null);
     setMessages([]);
@@ -323,22 +341,15 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
       <SocketErrorBanner error={lastError} onRetry={retry} onDismiss={clearError} />
 
-      {conn === "reconnecting" && !lastError && (
-        <div style={{
-          background: "rgba(240,185,11,0.1)", border: "1px solid rgba(240,185,11,0.25)",
-          borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#f0b90b",
-        }}>
-          Connection lost — reconnecting. Your seat is held.
-        </div>
-      )}
-
       {localError && (
-        <div style={{
-          background: "rgba(246,70,93,0.12)", border: "1px solid rgba(246,70,93,0.3)",
-          borderRadius: 10, padding: "8px 12px", marginBottom: 10,
-          fontSize: 12, color: "#f6465d", fontWeight: 600,
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
+        <div style={
+          {
+            background: "rgba(246,70,93,0.12)", border: "1px solid rgba(246,70,93,0.3)",
+            borderRadius: 10, padding: "8px 12px", marginBottom: 10,
+            fontSize: 12, color: "#f6465d", fontWeight: 600,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+          }
+        }>
           <span>{localError}</span>
           <button type="button" onClick={() => setLocalError("")} style={{
             background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontWeight: 700,
@@ -346,7 +357,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* ========== CREATE / JOIN LOBBY UI ========== */}
       {!room && (
         <div style={{
           background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
@@ -354,7 +364,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
           borderRadius: 20,
           overflow: "hidden",
         }}>
-          {/* Segment tabs */}
           <div style={{ display: "flex", padding: 6, gap: 6, background: "rgba(0,0,0,0.25)" }}>
             {([
               ["create", "Create Room"],
@@ -365,27 +374,17 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                 type="button"
                 onClick={() => { setTab(id); setLocalError(""); }}
                 style={{
-                  flex: 1,
-                  padding: "12px 8px",
-                  borderRadius: 12,
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                  fontSize: 14,
-                  background: tab === id
-                    ? "linear-gradient(135deg, #0ecb81, #0ba86a)"
-                    : "transparent",
+                  flex: 1, padding: "12px 8px", borderRadius: 12, border: "none", cursor: "pointer",
+                  fontWeight: 800, fontSize: 14,
+                  background: tab === id ? "linear-gradient(135deg, #0ecb81, #0ba86a)" : "transparent",
                   color: tab === id ? "#fff" : "#8b949e",
                   boxShadow: tab === id ? "0 4px 16px rgba(14,203,129,0.25)" : "none",
                 }}
-              >
-                {label}
-              </button>
+              >{label}</button>
             ))}
           </div>
 
           <div style={{ padding: 20 }}>
-            {/* Balance chip */}
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
               marginBottom: 18, padding: "10px 14px", borderRadius: 12,
@@ -397,32 +396,17 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
             {tab === "create" && (
               <>
-                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e", letterSpacing: 0.5 }}>
-                  ENTRY STAKE
-                </div>
+                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e" }}>ENTRY STAKE</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 18 }}>
                   {[0, 100, 500, 1000].map((v) => {
                     const active = stake === v;
                     return (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => setStake(v)}
-                        style={{
-                          padding: "14px 4px",
-                          borderRadius: 12,
-                          cursor: "pointer",
-                          fontWeight: 800,
-                          fontSize: 14,
-                          border: active ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
-                          background: active
-                            ? "linear-gradient(135deg, rgba(240,185,11,0.2), rgba(240,185,11,0.05))"
-                            : "rgba(255,255,255,0.03)",
-                          color: active ? "#f0b90b" : "#e6edf3",
-                        }}
-                      >
-                        {v === 0 ? "Free" : `₹${v}`}
-                      </button>
+                      <button key={v} type="button" onClick={() => setStake(v)} style={{
+                        padding: "14px 4px", borderRadius: 12, cursor: "pointer", fontWeight: 800, fontSize: 14,
+                        border: active ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
+                        background: active ? "linear-gradient(135deg, rgba(240,185,11,0.2), rgba(240,185,11,0.05))" : "rgba(255,255,255,0.03)",
+                        color: active ? "#f0b90b" : "#e6edf3",
+                      }}>{v === 0 ? "Free" : `₹${v}`}</button>
                     );
                   })}
                 </div>
@@ -438,88 +422,47 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                   • Winner gets 1.9× stake
                 </div>
 
-                <button
-                  type="button"
-                  onClick={createRoom}
-                  disabled={busy || conn === "offline"}
+                <button type="button" onClick={createRoom} disabled={busy}
                   style={{
-                    width: "100%",
-                    padding: 16,
-                    borderRadius: 14,
-                    border: "none",
-                    cursor: busy || conn === "offline" ? "not-allowed" : "pointer",
-                    fontWeight: 800,
-                    fontSize: 16,
-                    color: "#fff",
-                    background: busy || conn === "offline"
-                      ? "#21262d"
-                      : "linear-gradient(135deg, #0ecb81, #0ba86a)",
-                    boxShadow: busy || conn === "offline"
-                      ? "none"
-                      : "0 6px 24px rgba(14,203,129,0.3)",
+                    width: "100%", padding: 16, borderRadius: 14, border: "none",
+                    cursor: busy ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 16, color: "#fff",
+                    background: busy ? "#21262d" : "linear-gradient(135deg, #0ecb81, #0ba86a)",
+                    boxShadow: busy ? "none" : "0 6px 24px rgba(14,203,129,0.3)",
                   }}
                 >
                   {busy ? "Creating room..." : stake === 0 ? "Create Free Room" : `Create Room · ₹${stake}`}
                 </button>
+
+                <p style={{ marginTop: 12, fontSize: 11, color: "#6e7681", textAlign: "center" }}>
+                  Status must be ● Live before creating. Server may take 30s to wake.
+                </p>
               </>
             )}
 
             {tab === "join" && (
               <>
-                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e", letterSpacing: 0.5 }}>
-                  ROOM CODE
-                </div>
+                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e" }}>ROOM CODE</div>
                 <input
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
                   placeholder="e.g. AB12CD"
                   maxLength={8}
                   style={{
-                    width: "100%",
-                    padding: "18px 16px",
-                    borderRadius: 14,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "rgba(0,0,0,0.25)",
-                    color: "#f0b90b",
-                    fontSize: 22,
-                    fontWeight: 900,
-                    letterSpacing: 6,
-                    textAlign: "center",
-                    outline: "none",
-                    marginBottom: 14,
-                    boxSizing: "border-box",
+                    width: "100%", padding: "18px 16px", borderRadius: 14,
+                    border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)",
+                    color: "#f0b90b", fontSize: 22, fontWeight: 900, letterSpacing: 6,
+                    textAlign: "center", outline: "none", marginBottom: 14, boxSizing: "border-box",
                   }}
                 />
-
-                <div style={{
-                  marginBottom: 18, padding: 14, borderRadius: 12,
-                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-                  fontSize: 12, color: "#8b949e", lineHeight: 1.55,
-                }}>
-                  Ask your friend for the 6-character room code.
-                  Stake is locked to match the host room.
-                </div>
-
-                <button
-                  type="button"
-                  onClick={joinRoom}
-                  disabled={busy || conn === "offline" || joinCode.length < 4}
-                  style={{
-                    width: "100%",
-                    padding: 16,
-                    borderRadius: 14,
-                    border: "none",
-                    cursor: busy || conn === "offline" || joinCode.length < 4 ? "not-allowed" : "pointer",
-                    fontWeight: 800,
-                    fontSize: 16,
-                    color: "#0a0c10",
-                    background: busy || conn === "offline" || joinCode.length < 4
-                      ? "#21262d"
-                      : "linear-gradient(135deg, #f0b90b, #e5a800)",
-                    boxShadow: busy || joinCode.length < 4
-                      ? "none"
-                      : "0 6px 24px rgba(240,185,11,0.3)",
-                  }}
+                <button type="button" onClick={joinRoom} disabled={busy || joinCode.length < 4}
+                  style={
+                    {
+                      width: "100%", padding: 16, borderRadius: 14, border: "none",
+                      cursor: busy || joinCode.length < 4 ? "not-allowed" : "pointer",
+                      fontWeight: 800, fontSize: 16, color: "#0a0c10",
+                      background: busy || joinCode.length < 4 ? "#21262d" : "linear-gradient(135deg, #f0b90b, #e5a800)",
+                    }
+                  }
                 >
                   {busy ? "Joining..." : "Join Room"}
                 </button>
@@ -529,14 +472,11 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* ========== IN-ROOM UI ========== */}
       {room && (
         <>
           <div style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 16,
-            padding: 16,
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 16, padding: 16,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
               <div>
@@ -598,10 +538,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
               <div style={{ textAlign: "center", color: "#8b949e", fontSize: 13 }}>Waiting for host...</div>
             )}
             {room.status === "playing" && (
-              <button type="button" onClick={roll}
-                disabled={!myTurn || rolling || !connected} style={primary}>
-                {!connected ? "Reconnecting..." :
-                  !myTurn ? "Opponent turn" : rolling ? "Rolling..." : "Roll Dice"}
+              <button type="button" onClick={roll} disabled={!myTurn || rolling || !connected} style={primary}>
+                {!connected ? "Reconnecting..." : !myTurn ? "Opponent turn" : rolling ? "Rolling..." : "Roll Dice"}
               </button>
             )}
             {room.status === "finished" && (
@@ -612,18 +550,11 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                 {room.winner === myId ? "You won!" : "You lost"}
               </div>
             )}
-
-            {lastSync > 0 && (
-              <div style={{ textAlign: "center", fontSize: 10, color: "#6e7681", marginTop: 8 }}>
-                Synced {new Date(lastSync).toLocaleTimeString()}
-              </div>
-            )}
           </div>
 
           <div style={{
             marginTop: 12, background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16,
-            padding: 0, overflow: "hidden",
+            border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, overflow: "hidden",
           }}>
             <button type="button" onClick={() => setShowChat((v) => !v)} style={{
               width: "100%", padding: "12px 16px", border: "none",
@@ -634,35 +565,24 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
               <span>💬 Room Chat</span>
               <span style={{ color: "#6e7681" }}>{showChat ? "Hide" : "Show"}</span>
             </button>
-
             {showChat && (
               <>
-                <div style={{
-                  height: 180, overflowY: "auto", padding: "8px 12px",
-                  borderTop: "1px solid rgba(255,255,255,0.06)",
-                }}>
+                <div style={{ height: 160, overflowY: "auto", padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                   {messages.map((m) => (
                     <div key={m.id} style={{ marginBottom: 8 }}>
                       {m.system ? (
                         <div style={{ textAlign: "center", fontSize: 11, color: "#6e7681" }}>{m.text}</div>
                       ) : (
-                        <div style={
-                          {
-                            display: "flex", flexDirection: "column",
-                            alignItems: m.userId === myId ? "flex-end" : "flex-start",
-                          }
-                        }>
-                          <span style={{ fontSize: 10, color: "#8b949e", marginBottom: 2 }}>
-                            {m.userId === myId ? "You" : m.name}
-                          </span>
-                          <span style={
-                            {
-                              maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
-                              fontSize: 13, fontWeight: 500,
-                              background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
-                              color: "#e6edf3",
-                            }
-                          }>{m.text}</span>
+                        <div style={{
+                          display: "flex", flexDirection: "column",
+                          alignItems: m.userId === myId ? "flex-end" : "flex-start",
+                        }}>
+                          <span style={{ fontSize: 10, color: "#8b949e" }}>{m.userId === myId ? "You" : m.name}</span>
+                          <span style={{
+                            maxWidth: "80%", padding: "8px 12px", borderRadius: 12, fontSize: 13,
+                            background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
+                            color: "#e6edf3",
+                          }}>{m.text}</span>
                         </div>
                       )}
                     </div>
@@ -670,26 +590,19 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                   <div ref={chatEndRef} />
                 </div>
                 <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                  <input
-                    value={chatText}
-                    onChange={(e) => setChatText(e.target.value)}
+                  <input value={chatText} onChange={(e) => setChatText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && sendChat()}
                     placeholder={connected ? "Type a message..." : "Reconnecting..."}
-                    disabled={!connected}
-                    maxLength={200}
-                    style={
-                      {
-                        flex: 1, padding: "10px 12px", borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "rgba(255,255,255,0.04)", color: "#e6edf3",
-                        fontSize: 14, outline: "none",
-                      }
-                    }
+                    disabled={!connected} maxLength={200}
+                    style={{
+                      flex: 1, padding: "10px 12px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+                      color: "#e6edf3", fontSize: 14, outline: "none",
+                    }}
                   />
                   <button type="button" onClick={sendChat} disabled={!connected} style={{
                     padding: "10px 16px", borderRadius: 10, border: "none",
-                    background: connected ? "#0ecb81" : "#21262d",
-                    color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                    background: connected ? "#0ecb81" : "#21262d", color: "#fff", fontWeight: 700, fontSize: 13,
                   }}>Send</button>
                 </div>
               </>
@@ -702,20 +615,10 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 }
 
 const primary: React.CSSProperties = {
-  width: "100%",
-  padding: 14,
-  borderRadius: 12,
-  border: "none",
+  width: "100%", padding: 14, borderRadius: 12, border: "none",
   background: "linear-gradient(135deg, #0ecb81, #0ba86a)",
-  color: "#fff",
-  fontWeight: 800,
-  fontSize: 15,
-  cursor: "pointer",
+  color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer",
 };
 const link: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "#8b949e",
-  fontSize: 13,
-  cursor: "pointer",
+  background: "none", border: "none", color: "#8b949e", fontSize: 13, cursor: "pointer",
 };

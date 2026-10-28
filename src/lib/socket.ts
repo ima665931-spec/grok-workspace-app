@@ -81,7 +81,7 @@ export function getSocket(): Socket {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 8000,
       randomizationFactor: 0.4,
-      timeout: 15000,
+      timeout: 20000,
     });
 
     socket.on("connect", () => {
@@ -101,13 +101,6 @@ export function getSocket(): Socket {
               if (res.playerToken) {
                 setPendingRejoin(pending.code, pending.name, res.playerToken);
               }
-              safeEmit("request_sync");
-            } else {
-              emitSocketError({
-                code: "SERVER_ERROR",
-                message: res?.error || "Rejoin failed",
-                event: "join_room",
-              });
             }
           }
         );
@@ -134,14 +127,6 @@ export function getSocket(): Socket {
       });
     });
 
-    socket.io.on("reconnect_attempt", (n) => {
-      console.log("[socket] reconnect attempt", n);
-    });
-
-    socket.io.on("reconnect", (n) => {
-      console.log("[socket] reconnected after", n, "attempts");
-    });
-
     socket.io.on("reconnect_error", (err) => {
       emitSocketError({
         code: "CONNECT_ERROR",
@@ -149,14 +134,6 @@ export function getSocket(): Socket {
       });
     });
 
-    socket.io.on("reconnect_failed", () => {
-      emitSocketError({
-        code: "CONNECT_ERROR",
-        message: "All reconnection attempts failed",
-      });
-    });
-
-    // Server can push explicit errors
     socket.on("error", (payload: any) => {
       emitSocketError({
         code: "SERVER_ERROR",
@@ -181,17 +158,14 @@ export function forceReconnect() {
   setTimeout(() => s.connect(), 300);
 }
 
-/**
- * Safe emit with:
- * - not-connected guard
- * - ack timeout
- * - error normalization
- */
+/** Events where ok:false is normal and should NOT show error banner */
+const SOFT_FAIL_EVENTS = new Set(["request_sync"]);
+
 export function safeEmit(
   event: string,
   data?: unknown,
   ack?: (res: any) => void,
-  timeoutMs = 10000
+  timeoutMs = 15000
 ) {
   const s = getSocket();
 
@@ -219,21 +193,21 @@ export function safeEmit(
 
   try {
     if (ack) {
-      s.emit(event, data, (res: any) => {
+      s.emit(event, data ?? {}, (res: any) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (res && res.ok === false) {
+        if (res && res.ok === false && !SOFT_FAIL_EVENTS.has(event)) {
           emitSocketError({
             code: "SERVER_ERROR",
             message: res.error || "Request failed",
             event,
           });
         }
-        ack(res);
+        ack(res ?? { ok: false, error: "Empty response" });
       });
     } else {
-      s.emit(event, data);
+      s.emit(event, data ?? {});
       clearTimeout(timer);
       settled = true;
     }
