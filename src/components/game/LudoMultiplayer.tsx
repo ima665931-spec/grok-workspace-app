@@ -1,9 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import {
-  getSocket,
-  setPendingRejoin,
-  forceReconnect,
-} from "../../lib/socket";
+import { setPendingRejoin, safeEmit } from "../../lib/socket";
+import { useSocket } from "../../hooks/useSocket";
+import { SocketErrorBanner } from "../SocketErrorBanner";
 import { useAuth } from "../../game/auth";
 import { useGame } from "../../game/store";
 import { formatCoins } from "../../game/logic";
@@ -34,8 +32,6 @@ type ChatMsg = {
   system?: boolean;
 };
 
-type ConnStatus = "connected" | "connecting" | "reconnecting" | "offline";
-
 export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const user = useAuth((s) => s.user);
   const balance = useGame((s) => s.balance);
@@ -43,9 +39,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const creditWin = useGame((s) => s.creditWin);
   const recordBet = useGame((s) => s.recordBet);
 
-  const [conn, setConn] = useState<ConnStatus>("connecting");
-  const [reconnectTry, setReconnectTry] = useState(0);
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [stake, setStake] = useState(100);
   const [room, setRoom] = useState<GameState | null>(null);
@@ -65,40 +59,36 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     if (state.updatedAt) setLastSync(state.updatedAt);
   }, []);
 
+  const {
+    status: conn,
+    attempt: reconnectTry,
+    connected,
+    socketId,
+    lastError,
+    clearError,
+    retry,
+    socket,
+  } = useSocket({
+    onConnect: (s) => {
+      setMyId(s.id || "");
+      setLocalError("");
+      safeEmit("request_sync", {}, (res: any) => {
+        if (res?.ok && res.room) applyState(res.room);
+      });
+    },
+    syncIntervalMs: 10000,
+  });
+
+  useEffect(() => {
+    if (socketId) setMyId(socketId);
+  }, [socketId]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    const s = getSocket();
-
-    const onConnect = () => {
-      setConn("connected");
-      setReconnectTry(0);
-      setMyId(s.id || "");
-      setError("");
-      s.emit("request_sync", (res: any) => {
-        if (res?.ok && res.room) applyState(res.room);
-      });
-    };
-
-    const onDisconnect = (reason: string) => {
-      setConn(reason === "io client disconnect" ? "offline" : "reconnecting");
-    };
-
-    const onConnectError = () => setConn("reconnecting");
-
-    const onReconnectAttempt = (n: number) => {
-      setConn("reconnecting");
-      setReconnectTry(n);
-    };
-
-    const onReconnect = () => {
-      setConn("connected");
-      setReconnectTry(0);
-      setMyId(s.id || "");
-      setTimeout(() => s.emit("request_sync"), 250);
-    };
+    const s = socket;
 
     const onGameState = (state: GameState) => {
       applyState(state);
@@ -127,158 +117,113 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       }
     };
 
-    s.on("connect", onConnect);
-    s.on("disconnect", onDisconnect);
-    s.on("connect_error", onConnectError);
-    s.io.on("reconnect_attempt", onReconnectAttempt);
-    s.io.on("reconnect", onReconnect);
     s.on("game_state", onGameState);
     s.on("room_update", onGameState);
     s.on("game_started", onGameState);
     s.on("game_over", onOver);
     s.on("chat_message", onChat);
 
-    const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        if (!s.connected) {
-          setConn("reconnecting");
-          s.connect();
-        } else {
-          s.emit("request_sync");
-        }
-      }
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    const onOnline = () => {
-      setConn("reconnecting");
-      if (!s.connected) s.connect();
-    };
-    const onOffline = () => setConn("offline");
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-
-    const interval = window.setInterval(() => {
-      if (s.connected) s.emit("request_sync");
-      else if (navigator.onLine) s.connect();
-    }, 10000);
-
-    if (!s.connected) {
-      setConn("connecting");
-      s.connect();
-    } else onConnect();
-
     return () => {
-      s.off("connect", onConnect);
-      s.off("disconnect", onDisconnect);
-      s.off("connect_error", onConnectError);
-      s.io.off("reconnect_attempt", onReconnectAttempt);
-      s.io.off("reconnect", onReconnect);
       s.off("game_state", onGameState);
       s.off("room_update", onGameState);
       s.off("game_started", onGameState);
       s.off("game_over", onOver);
       s.off("chat_message", onChat);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-      clearInterval(interval);
     };
-  }, [applyState, creditWin, recordBet]);
+  }, [socket, applyState, creditWin, recordBet]);
 
   const name = user?.name || "Player";
 
   const createRoom = () => {
-    setError("");
+    setLocalError("");
+    clearError();
     setMessages([]);
     settledRef.current = null;
     if (stake > 0 && stake > balance) {
-      setError("Insufficient balance");
+      setLocalError("Insufficient balance");
       return;
     }
     if (stake > 0 && !tryPlaceStake(stake)) {
-      setError("Could not lock stake");
+      setLocalError("Could not lock stake");
       return;
     }
-    const s = getSocket();
-    if (!s.connected) s.connect();
-    s.emit("create_room", { name, stake }, (res: any) => {
+    safeEmit("create_room", { name, stake }, (res: any) => {
       if (!res?.ok) {
         if (stake > 0) creditWin(stake);
-        setError(res?.error || "Create failed");
+        setLocalError(res?.error || "Create failed");
         return;
       }
-      setMyId(s.id || "");
+      setMyId(socket.id || "");
       applyState(res.room);
       setPendingRejoin(res.room.code, name, res.playerToken);
     });
   };
 
   const joinRoom = () => {
-    setError("");
+    setLocalError("");
+    clearError();
     setMessages([]);
     settledRef.current = null;
-    const s = getSocket();
-    if (!s.connected) s.connect();
     const code = joinCode.trim();
-    s.emit("join_room", { code, name }, (res: any) => {
+    safeEmit("join_room", { code, name }, (res: any) => {
       if (!res?.ok) {
-        setError(res?.error || "Join failed");
+        setLocalError(res?.error || "Join failed");
         return;
       }
       const r = res.room as GameState;
       if (r.stake > 0) {
         if (r.stake > balance || !tryPlaceStake(r.stake)) {
-          setError("Need ₹" + r.stake + " to join");
-          s.emit("leave_room");
+          setLocalError("Need ₹" + r.stake + " to join");
+          safeEmit("leave_room");
           return;
         }
       }
-      setMyId(s.id || "");
+      setMyId(socket.id || "");
       applyState(r);
       setPendingRejoin(r.code, name, res.playerToken);
     });
   };
 
   const startGame = () => {
-    getSocket().emit("start_game", (res: any) => {
-      if (!res?.ok) setError(res?.error || "Start failed");
+    setLocalError("");
+    safeEmit("start_game", {}, (res: any) => {
+      if (!res?.ok) setLocalError(res?.error || "Start failed");
     });
   };
 
   const roll = () => {
-    if (rolling || conn !== "connected") return;
+    if (rolling || !connected) return;
     setRolling(true);
-    getSocket().emit("roll_dice", (res: any) => {
+    setLocalError("");
+    safeEmit("roll_dice", {}, (res: any) => {
       setRolling(false);
-      if (!res?.ok) setError(res?.error || "Roll failed");
+      if (!res?.ok) setLocalError(res?.error || "Roll failed");
       if (res?.state) applyState(res.state);
     });
   };
 
   const sendChat = () => {
     const text = chatText.trim();
-    if (!text || conn !== "connected") return;
+    if (!text || !connected) return;
     setChatText("");
-    getSocket().emit("chat_message", { text }, (res: any) => {
-      if (!res?.ok) setError(res?.error || "Chat failed");
+    safeEmit("chat_message", { text }, (res: any) => {
+      if (!res?.ok) setLocalError(res?.error || "Chat failed");
     });
   };
 
   const forceSync = () => {
-    const s = getSocket();
-    if (!s.connected) {
-      forceReconnect();
+    if (!connected) {
+      retry();
       return;
     }
-    s.emit("request_sync", (res: any) => {
+    safeEmit("request_sync", {}, (res: any) => {
       if (res?.ok && res.room) applyState(res.room);
     });
   };
 
   const leave = () => {
     setPendingRejoin(null);
-    getSocket().emit("leave_room");
+    safeEmit("leave_room");
     setRoom(null);
     setMessages([]);
     onBack();
@@ -309,7 +254,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         <div style={{ fontSize: 12, color: statusColor, fontWeight: 600 }}>{statusText}</div>
         <div style={{ display: "flex", gap: 10 }}>
           {conn !== "connected" && (
-            <button type="button" onClick={() => forceReconnect()} style={{ ...link, fontSize: 11, color: "#f0b90b" }}>
+            <button type="button" onClick={retry} style={{ ...link, fontSize: 11, color: "#f0b90b" }}>
               Retry
             </button>
           )}
@@ -319,7 +264,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      {conn === "reconnecting" && (
+      {/* WebSocket error banner */}
+      <SocketErrorBanner
+        error={lastError}
+        onRetry={retry}
+        onDismiss={clearError}
+      />
+
+      {conn === "reconnecting" && !lastError && (
         <div style={{
           background: "rgba(240,185,11,0.1)", border: "1px solid rgba(240,185,11,0.25)",
           borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#f0b90b",
@@ -328,8 +280,18 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {error && (
-        <div style={{ color: "#f6465d", fontSize: 13, marginBottom: 10, fontWeight: 600 }}>{error}</div>
+      {localError && (
+        <div style={{
+          background: "rgba(246,70,93,0.12)", border: "1px solid rgba(246,70,93,0.3)",
+          borderRadius: 10, padding: "8px 12px", marginBottom: 10,
+          fontSize: 12, color: "#f6465d", fontWeight: 600,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>{localError}</span>
+          <button type="button" onClick={() => setLocalError("")} style={{
+            background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontWeight: 700,
+          }}>✕</button>
+        </div>
       )}
 
       {!room && (
@@ -416,7 +378,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
             {room.status === "waiting" && isHost && (
               <button type="button" onClick={startGame} style={primary}
-                disabled={room.players.filter((p) => p.connected !== false).length < 2 || conn !== "connected"}>
+                disabled={room.players.filter((p) => p.connected !== false).length < 2 || !connected}>
                 {room.players.filter((p) => p.connected !== false).length < 2
                   ? "Waiting for players..."
                   : "Start Game"}
@@ -427,8 +389,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
             )}
             {room.status === "playing" && (
               <button type="button" onClick={roll}
-                disabled={!myTurn || rolling || conn !== "connected"} style={primary}>
-                {conn !== "connected" ? "Reconnecting..." :
+                disabled={!myTurn || rolling || !connected} style={primary}>
+                {!connected ? "Reconnecting..." :
                   !myTurn ? "Opponent turn" : rolling ? "Rolling..." : "Roll Dice"}
               </button>
             )}
@@ -494,8 +456,8 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                     value={chatText}
                     onChange={(e) => setChatText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && sendChat()}
-                    placeholder={conn === "connected" ? "Type a message..." : "Reconnecting..."}
-                    disabled={conn !== "connected"}
+                    placeholder={connected ? "Type a message..." : "Reconnecting..."}
+                    disabled={!connected}
                     maxLength={200}
                     style={{
                       flex: 1, padding: "10px 12px", borderRadius: 10,
@@ -504,9 +466,9 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                       fontSize: 14, outline: "none",
                     }}
                   />
-                  <button type="button" onClick={sendChat} disabled={conn !== "connected"} style={{
+                  <button type="button" onClick={sendChat} disabled={!connected} style={{
                     padding: "10px 16px", borderRadius: 10, border: "none",
-                    background: conn === "connected" ? "#0ecb81" : "#21262d",
+                    background: connected ? "#0ecb81" : "#21262d",
                     color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer",
                   }}>Send</button>
                 </div>
