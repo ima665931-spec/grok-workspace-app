@@ -32,7 +32,6 @@ type ChatMsg = {
   system?: boolean;
 };
 
-/** Wait until socket is connected (for cold starts) */
 function waitForConnect(maxMs = 25000): Promise<boolean> {
   const s = getSocket();
   if (s.connected) return Promise.resolve(true);
@@ -69,6 +68,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const [chatText, setChatText] = useState("");
   const [showChat, setShowChat] = useState(true);
   const [lastSync, setLastSync] = useState(0);
+  const [tab, setTab] = useState<"create" | "join">("create");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const settledRef = useRef<string | null>(null);
 
@@ -333,14 +333,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       )}
 
       {localError && (
-        <div style={
-          {
-            background: "rgba(246,70,93,0.12)", border: "1px solid rgba(246,70,93,0.3)",
-            borderRadius: 10, padding: "8px 12px", marginBottom: 10,
-            fontSize: 12, color: "#f6465d", fontWeight: 600,
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }
-        }>
+        <div style={{
+          background: "rgba(246,70,93,0.12)", border: "1px solid rgba(246,70,93,0.3)",
+          borderRadius: 10, padding: "8px 12px", marginBottom: 10,
+          fontSize: 12, color: "#f6465d", fontWeight: 600,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
           <span>{localError}</span>
           <button type="button" onClick={() => setLocalError("")} style={{
             background: "none", border: "none", color: "#8b949e", cursor: "pointer", fontWeight: 700,
@@ -348,40 +346,198 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
+      {/* ========== CREATE / JOIN LOBBY UI ========== */}
       {!room && (
-        <>
-          <div style={card}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>Create Room</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              {[0, 100, 500, 1000].map((v) => (
-                <button key={v} type="button" onClick={() => setStake(v)} style={chip(stake === v)}>
-                  {v === 0 ? "Free" : v}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={createRoom} style={primary} disabled={busy || conn === "offline"}>
-              {busy ? "Connecting..." : "Create Room"}
-            </button>
+        <div style={{
+          background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 20,
+          overflow: "hidden",
+        }}>
+          {/* Segment tabs */}
+          <div style={{ display: "flex", padding: 6, gap: 6, background: "rgba(0,0,0,0.25)" }}>
+            {([
+              ["create", "Create Room"],
+              ["join", "Join Room"],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setTab(id); setLocalError(""); }}
+                style={{
+                  flex: 1,
+                  padding: "12px 8px",
+                  borderRadius: 12,
+                  border: "none",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  background: tab === id
+                    ? "linear-gradient(135deg, #0ecb81, #0ba86a)"
+                    : "transparent",
+                  color: tab === id ? "#fff" : "#8b949e",
+                  boxShadow: tab === id ? "0 4px 16px rgba(14,203,129,0.25)" : "none",
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <div style={{ ...card, marginTop: 12 }}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>Join Room</div>
-            <input
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              placeholder="Room code"
-              style={input}
-            />
-            <button type="button" onClick={joinRoom} style={primary} disabled={busy || conn === "offline"}>
-              {busy ? "Connecting..." : "Join"}
-            </button>
+          <div style={{ padding: 20 }}>
+            {/* Balance chip */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              marginBottom: 18, padding: "10px 14px", borderRadius: 12,
+              background: "rgba(240,185,11,0.08)", border: "1px solid rgba(240,185,11,0.2)",
+            }}>
+              <span style={{ fontSize: 12, color: "#8b949e", fontWeight: 600 }}>Your balance</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "#f0b90b" }}>₹{formatCoins(balance)}</span>
+            </div>
+
+            {tab === "create" && (
+              <>
+                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e", letterSpacing: 0.5 }}>
+                  ENTRY STAKE
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 18 }}>
+                  {[0, 100, 500, 1000].map((v) => {
+                    const active = stake === v;
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setStake(v)}
+                        style={{
+                          padding: "14px 4px",
+                          borderRadius: 12,
+                          cursor: "pointer",
+                          fontWeight: 800,
+                          fontSize: 14,
+                          border: active ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
+                          background: active
+                            ? "linear-gradient(135deg, rgba(240,185,11,0.2), rgba(240,185,11,0.05))"
+                            : "rgba(255,255,255,0.03)",
+                          color: active ? "#f0b90b" : "#e6edf3",
+                        }}
+                      >
+                        {v === 0 ? "Free" : `₹${v}`}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{
+                  marginBottom: 18, padding: 14, borderRadius: 12,
+                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                  fontSize: 12, color: "#8b949e", lineHeight: 1.55,
+                }}>
+                  <div style={{ color: "#e6edf3", fontWeight: 700, marginBottom: 6 }}>Room rules</div>
+                  • Race to 50 points<br />
+                  • 2–4 players · server dice<br />
+                  • Winner gets 1.9× stake
+                </div>
+
+                <button
+                  type="button"
+                  onClick={createRoom}
+                  disabled={busy || conn === "offline"}
+                  style={{
+                    width: "100%",
+                    padding: 16,
+                    borderRadius: 14,
+                    border: "none",
+                    cursor: busy || conn === "offline" ? "not-allowed" : "pointer",
+                    fontWeight: 800,
+                    fontSize: 16,
+                    color: "#fff",
+                    background: busy || conn === "offline"
+                      ? "#21262d"
+                      : "linear-gradient(135deg, #0ecb81, #0ba86a)",
+                    boxShadow: busy || conn === "offline"
+                      ? "none"
+                      : "0 6px 24px rgba(14,203,129,0.3)",
+                  }}
+                >
+                  {busy ? "Creating room..." : stake === 0 ? "Create Free Room" : `Create Room · ₹${stake}`}
+                </button>
+              </>
+            )}
+
+            {tab === "join" && (
+              <>
+                <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: "#8b949e", letterSpacing: 0.5 }}>
+                  ROOM CODE
+                </div>
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
+                  placeholder="e.g. AB12CD"
+                  maxLength={8}
+                  style={{
+                    width: "100%",
+                    padding: "18px 16px",
+                    borderRadius: 14,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(0,0,0,0.25)",
+                    color: "#f0b90b",
+                    fontSize: 22,
+                    fontWeight: 900,
+                    letterSpacing: 6,
+                    textAlign: "center",
+                    outline: "none",
+                    marginBottom: 14,
+                    boxSizing: "border-box",
+                  }}
+                />
+
+                <div style={{
+                  marginBottom: 18, padding: 14, borderRadius: 12,
+                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                  fontSize: 12, color: "#8b949e", lineHeight: 1.55,
+                }}>
+                  Ask your friend for the 6-character room code.
+                  Stake is locked to match the host room.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={joinRoom}
+                  disabled={busy || conn === "offline" || joinCode.length < 4}
+                  style={{
+                    width: "100%",
+                    padding: 16,
+                    borderRadius: 14,
+                    border: "none",
+                    cursor: busy || conn === "offline" || joinCode.length < 4 ? "not-allowed" : "pointer",
+                    fontWeight: 800,
+                    fontSize: 16,
+                    color: "#0a0c10",
+                    background: busy || conn === "offline" || joinCode.length < 4
+                      ? "#21262d"
+                      : "linear-gradient(135deg, #f0b90b, #e5a800)",
+                    boxShadow: busy || joinCode.length < 4
+                      ? "none"
+                      : "0 6px 24px rgba(240,185,11,0.3)",
+                  }}
+                >
+                  {busy ? "Joining..." : "Join Room"}
+                </button>
+              </>
+            )}
           </div>
-        </>
+        </div>
       )}
 
+      {/* ========== IN-ROOM UI ========== */}
       {room && (
         <>
-          <div style={card}>
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 16,
+            padding: 16,
+          }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 12, color: "#8b949e" }}>Room</div>
@@ -464,7 +620,11 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
             )}
           </div>
 
-          <div style={{ ...card, marginTop: 12, padding: 0, overflow: "hidden" }}>
+          <div style={{
+            marginTop: 12, background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16,
+            padding: 0, overflow: "hidden",
+          }}>
             <button type="button" onClick={() => setShowChat((v) => !v)} style={{
               width: "100%", padding: "12px 16px", border: "none",
               background: "rgba(255,255,255,0.03)", color: "#e6edf3",
@@ -486,19 +646,23 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                       {m.system ? (
                         <div style={{ textAlign: "center", fontSize: 11, color: "#6e7681" }}>{m.text}</div>
                       ) : (
-                        <div style={{
-                          display: "flex", flexDirection: "column",
-                          alignItems: m.userId === myId ? "flex-end" : "flex-start",
-                        }}>
+                        <div style={
+                          {
+                            display: "flex", flexDirection: "column",
+                            alignItems: m.userId === myId ? "flex-end" : "flex-start",
+                          }
+                        }>
                           <span style={{ fontSize: 10, color: "#8b949e", marginBottom: 2 }}>
                             {m.userId === myId ? "You" : m.name}
                           </span>
-                          <span style={{
-                            maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
-                            fontSize: 13, fontWeight: 500,
-                            background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
-                            color: "#e6edf3",
-                          }}>{m.text}</span>
+                          <span style={
+                            {
+                              maxWidth: "80%", padding: "8px 12px", borderRadius: 12,
+                              fontSize: 13, fontWeight: 500,
+                              background: m.userId === myId ? "rgba(14,203,129,0.2)" : "rgba(255,255,255,0.06)",
+                              color: "#e6edf3",
+                            }
+                          }>{m.text}</span>
                         </div>
                       )}
                     </div>
@@ -513,12 +677,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                     placeholder={connected ? "Type a message..." : "Reconnecting..."}
                     disabled={!connected}
                     maxLength={200}
-                    style={{
-                      flex: 1, padding: "10px 12px", borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      background: "rgba(255,255,255,0.04)", color: "#e6edf3",
-                      fontSize: 14, outline: "none",
-                    }}
+                    style={
+                      {
+                        flex: 1, padding: "10px 12px", borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "rgba(255,255,255,0.04)", color: "#e6edf3",
+                        fontSize: 14, outline: "none",
+                      }
+                    }
                   />
                   <button type="button" onClick={sendChat} disabled={!connected} style={{
                     padding: "10px 16px", borderRadius: 10, border: "none",
@@ -535,26 +701,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   );
 }
 
-const card: React.CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: 16,
-  padding: 16,
-};
-const input: React.CSSProperties = {
-  width: "100%",
-  padding: "12px 14px",
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
-  color: "#e6edf3",
-  fontSize: 16,
-  marginBottom: 10,
-  outline: "none",
-  boxSizing: "border-box",
-  letterSpacing: 2,
-  fontWeight: 700,
-};
 const primary: React.CSSProperties = {
   width: "100%",
   padding: 14,
@@ -573,16 +719,3 @@ const link: React.CSSProperties = {
   fontSize: 13,
   cursor: "pointer",
 };
-function chip(active: boolean): React.CSSProperties {
-  return {
-    flex: 1,
-    padding: 8,
-    borderRadius: 10,
-    fontWeight: 700,
-    fontSize: 12,
-    cursor: "pointer",
-    border: active ? "1px solid #f0b90b" : "1px solid rgba(255,255,255,0.08)",
-    background: active ? "rgba(240,185,11,0.12)" : "rgba(255,255,255,0.03)",
-    color: active ? "#f0b90b" : "#e6edf3",
-  };
-}
