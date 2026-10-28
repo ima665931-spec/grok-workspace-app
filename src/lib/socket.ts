@@ -6,7 +6,6 @@ const URL =
 
 let socket: Socket | null = null;
 
-/** Persist room + token so reconnect can rejoin mid-game */
 const REJOIN_KEY = "betrush-rejoin";
 
 export type RejoinInfo = { code: string; name: string; playerToken: string };
@@ -37,11 +36,16 @@ export function getPendingRejoin(): RejoinInfo | null {
   }
 }
 
+/**
+ * Singleton Socket.IO client with reconnection enabled.
+ * Use via useSocket() in React components.
+ */
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(URL, {
       autoConnect: false,
       transports: ["websocket", "polling"],
+      // Reconnection policy
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -52,6 +56,7 @@ export function getSocket(): Socket {
 
     socket.on("connect", () => {
       console.log("[socket] connected", socket?.id);
+      // Auto rejoin room after any connect/reconnect
       const pending = getPendingRejoin();
       if (pending && socket) {
         socket.emit(
@@ -63,7 +68,7 @@ export function getSocket(): Socket {
           },
           (res: any) => {
             if (res?.ok) {
-              console.log("[socket] rejoined room", pending.code);
+              console.log("[socket] rejoined", pending.code);
               if (res.playerToken) {
                 setPendingRejoin(pending.code, pending.name, res.playerToken);
               }
@@ -78,6 +83,7 @@ export function getSocket(): Socket {
 
     socket.on("disconnect", (reason) => {
       console.log("[socket] disconnected", reason);
+      // Server forced disconnect → manual reconnect
       if (reason === "io server disconnect") {
         socket?.connect();
       }
@@ -102,6 +108,7 @@ export function getSocketUrl() {
   return URL;
 }
 
+/** Tear down and connect again */
 export function forceReconnect() {
   const s = getSocket();
   if (s.connected) s.disconnect();
