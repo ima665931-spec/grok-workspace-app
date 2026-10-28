@@ -14,9 +14,7 @@ export type ConnStatus = "connected" | "connecting" | "reconnecting" | "offline"
 
 export function useSocket(options?: {
   onConnect?: (socket: Socket) => void;
-  /** Receive structured socket errors */
   onError?: (err: SocketError) => void;
-  /** Keep last N errors in state */
   errorHistory?: number;
   syncIntervalMs?: number;
 }) {
@@ -45,7 +43,6 @@ export function useSocket(options?: {
       setStatus("connected");
       setAttempt(0);
       setSocketId(s.id || "");
-      // clear transient connect errors on success
       setLastError((prev) =>
         prev?.code === "CONNECT_ERROR" || prev?.code === "DISCONNECT"
           ? null
@@ -165,22 +162,22 @@ export function useSocket(options?: {
   };
 }
 
-/** Friendly message for UI banners */
+/** Friendly English messages for UI banners */
 export function socketErrorText(err: SocketError | null): string {
   if (!err) return "";
   switch (err.code) {
     case "CONNECT_ERROR":
-      return "Server se connect nahi ho pa raha. Check internet / server.";
+      return "Cannot connect to server. Check your internet or try again.";
     case "TIMEOUT":
-      return "Server slow respond kar raha hai. Retry karo.";
+      return "Server is taking too long to respond. Please retry.";
     case "DISCONNECT":
-      return "Connection toot gaya. Reconnect ho raha hai...";
+      return "Connection lost. Reconnecting...";
     case "NOT_CONNECTED":
-      return "Abhi connected nahi ho. Wait or Retry.";
+      return "Not connected to server. Please wait or tap Retry.";
     case "SERVER_ERROR":
       return err.message || "Server error";
     case "EMIT_FAILED":
-      return "Request bhej nahi paaye.";
+      return "Failed to send request. Please try again.";
     default:
       return err.message || "Unknown socket error";
   }
