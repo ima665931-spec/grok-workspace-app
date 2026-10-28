@@ -10,6 +10,41 @@ const REJOIN_KEY = "betrush-rejoin";
 
 export type RejoinInfo = { code: string; name: string; playerToken: string };
 
+export type SocketError = {
+  code:
+    | "CONNECT_ERROR"
+    | "TIMEOUT"
+    | "DISCONNECT"
+    | "EMIT_FAILED"
+    | "SERVER_ERROR"
+    | "NOT_CONNECTED"
+    | "UNKNOWN";
+  message: string;
+  event?: string;
+  at: number;
+};
+
+type ErrorListener = (err: SocketError) => void;
+const errorListeners = new Set<ErrorListener>();
+
+export function onSocketError(fn: ErrorListener) {
+  errorListeners.add(fn);
+  return () => errorListeners.delete(fn);
+}
+
+export function emitSocketError(err: Omit<SocketError, "at"> & { at?: number }) {
+  const full: SocketError = { ...err, at: err.at ?? Date.now() };
+  console.warn("[socket:error]", full.code, full.message, full.event || "");
+  errorListeners.forEach((fn) => {
+    try {
+      fn(full);
+    } catch (e) {
+      console.error(e);
+    }
+  });
+  return full;
+}
+
 export function setPendingRejoin(
   code: string | null,
   name?: string,
@@ -36,16 +71,11 @@ export function getPendingRejoin(): RejoinInfo | null {
   }
 }
 
-/**
- * Singleton Socket.IO client with reconnection enabled.
- * Use via useSocket() in React components.
- */
 export function getSocket(): Socket {
   if (!socket) {
     socket = io(URL, {
       autoConnect: false,
       transports: ["websocket", "polling"],
-      // Reconnection policy
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -56,25 +86,28 @@ export function getSocket(): Socket {
 
     socket.on("connect", () => {
       console.log("[socket] connected", socket?.id);
-      // Auto rejoin room after any connect/reconnect
       const pending = getPendingRejoin();
       if (pending && socket) {
-        socket.emit(
+        safeEmit(
           "join_room",
           {
             code: pending.code,
             name: pending.name,
             playerToken: pending.playerToken,
           },
-          (res: any) => {
+          (res) => {
             if (res?.ok) {
               console.log("[socket] rejoined", pending.code);
               if (res.playerToken) {
                 setPendingRejoin(pending.code, pending.name, res.playerToken);
               }
-              socket?.emit("request_sync");
+              safeEmit("request_sync");
             } else {
-              console.warn("[socket] rejoin failed", res?.error);
+              emitSocketError({
+                code: "SERVER_ERROR",
+                message: res?.error || "Rejoin failed",
+                event: "join_room",
+              });
             }
           }
         );
@@ -83,14 +116,22 @@ export function getSocket(): Socket {
 
     socket.on("disconnect", (reason) => {
       console.log("[socket] disconnected", reason);
-      // Server forced disconnect → manual reconnect
+      if (reason !== "io client disconnect") {
+        emitSocketError({
+          code: "DISCONNECT",
+          message: `Disconnected: ${reason}`,
+        });
+      }
       if (reason === "io server disconnect") {
         socket?.connect();
       }
     });
 
     socket.on("connect_error", (err) => {
-      console.warn("[socket] connect_error", err.message);
+      emitSocketError({
+        code: "CONNECT_ERROR",
+        message: err?.message || "Failed to connect to server",
+      });
     });
 
     socket.io.on("reconnect_attempt", (n) => {
@@ -100,6 +141,32 @@ export function getSocket(): Socket {
     socket.io.on("reconnect", (n) => {
       console.log("[socket] reconnected after", n, "attempts");
     });
+
+    socket.io.on("reconnect_error", (err) => {
+      emitSocketError({
+        code: "CONNECT_ERROR",
+        message: err?.message || "Reconnect failed",
+      });
+    });
+
+    socket.io.on("reconnect_failed", () => {
+      emitSocketError({
+        code: "CONNECT_ERROR",
+        message: "All reconnection attempts failed",
+      });
+    });
+
+    // Server can push explicit errors
+    socket.on("error", (payload: any) => {
+      emitSocketError({
+        code: "SERVER_ERROR",
+        message:
+          typeof payload === "string"
+            ? payload
+            : payload?.message || "Server error",
+        event: payload?.event,
+      });
+    });
   }
   return socket;
 }
@@ -108,9 +175,77 @@ export function getSocketUrl() {
   return URL;
 }
 
-/** Tear down and connect again */
 export function forceReconnect() {
   const s = getSocket();
   if (s.connected) s.disconnect();
   setTimeout(() => s.connect(), 300);
+}
+
+/**
+ * Safe emit with:
+ * - not-connected guard
+ * - ack timeout
+ * - error normalization
+ */
+export function safeEmit(
+  event: string,
+  data?: unknown,
+  ack?: (res: any) => void,
+  timeoutMs = 10000
+) {
+  const s = getSocket();
+
+  if (!s.connected) {
+    const err = emitSocketError({
+      code: "NOT_CONNECTED",
+      message: "Not connected to server",
+      event,
+    });
+    ack?.({ ok: false, error: err.message, code: err.code });
+    return;
+  }
+
+  let settled = false;
+  const timer = window.setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    const err = emitSocketError({
+      code: "TIMEOUT",
+      message: `No response for "${event}" (${timeoutMs}ms)`,
+      event,
+    });
+    ack?.({ ok: false, error: err.message, code: err.code });
+  }, timeoutMs);
+
+  try {
+    if (ack) {
+      s.emit(event, data, (res: any) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (res && res.ok === false) {
+          emitSocketError({
+            code: "SERVER_ERROR",
+            message: res.error || "Request failed",
+            event,
+          });
+        }
+        ack(res);
+      });
+    } else {
+      s.emit(event, data);
+      clearTimeout(timer);
+      settled = true;
+    }
+  } catch (e: any) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    const err = emitSocketError({
+      code: "EMIT_FAILED",
+      message: e?.message || "Emit failed",
+      event,
+    });
+    ack?.({ ok: false, error: err.message, code: err.code });
+  }
 }
