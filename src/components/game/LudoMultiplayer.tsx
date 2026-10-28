@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import {
   getSocket,
-  getSocketUrl,
   setPendingRejoin,
   forceReconnect,
 } from "../../lib/socket";
@@ -9,7 +8,7 @@ import { useAuth } from "../../game/auth";
 import { useGame } from "../../game/store";
 import { formatCoins } from "../../game/logic";
 
-type Player = { id: string; name: string; pos: number };
+type Player = { id: string; name: string; pos: number; connected?: boolean };
 
 type GameState = {
   code: string;
@@ -58,12 +57,10 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
   const [lastSync, setLastSync] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const settledRef = useRef<string | null>(null);
-  const roomCodeRef = useRef<string | null>(null);
 
   const applyState = useCallback((state: GameState) => {
     if (!state) return;
     setRoom(state);
-    roomCodeRef.current = state.code;
     if (state.messages) setMessages(state.messages);
     if (state.updatedAt) setLastSync(state.updatedAt);
   }, []);
@@ -74,7 +71,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const s = getSocket();
-    const playerName = user?.name || "Player";
 
     const onConnect = () => {
       setConn("connected");
@@ -90,9 +86,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       setConn(reason === "io client disconnect" ? "offline" : "reconnecting");
     };
 
-    const onConnectError = () => {
-      setConn("reconnecting");
-    };
+    const onConnectError = () => setConn("reconnecting");
 
     const onReconnectAttempt = (n: number) => {
       setConn("reconnecting");
@@ -102,11 +96,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     const onReconnect = () => {
       setConn("connected");
       setReconnectTry(0);
-      // pending rejoin handled in socket.ts; also request sync
-      setTimeout(() => s.emit("request_sync"), 200);
+      setMyId(s.id || "");
+      setTimeout(() => s.emit("request_sync"), 250);
     };
 
-    const onGameState = (state: GameState) => applyState(state);
+    const onGameState = (state: GameState) => {
+      applyState(state);
+      if (s.id) setMyId(s.id);
+    };
 
     const onChat = (msg: ChatMsg) => {
       setMessages((prev) => {
@@ -153,7 +150,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     };
     document.addEventListener("visibilitychange", onVisible);
 
-    // Online/offline browser events
     const onOnline = () => {
       setConn("reconnecting");
       if (!s.connected) s.connect();
@@ -170,9 +166,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     if (!s.connected) {
       setConn("connecting");
       s.connect();
-    } else {
-      onConnect();
-    }
+    } else onConnect();
 
     return () => {
       s.off("connect", onConnect);
@@ -190,7 +184,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       window.removeEventListener("offline", onOffline);
       clearInterval(interval);
     };
-  }, [applyState, creditWin, recordBet, user?.name]);
+  }, [applyState, creditWin, recordBet]);
 
   const name = user?.name || "Player";
 
@@ -216,7 +210,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       }
       setMyId(s.id || "");
       applyState(res.room);
-      setPendingRejoin(res.room.code, name);
+      setPendingRejoin(res.room.code, name, res.playerToken);
     });
   };
 
@@ -242,7 +236,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
       }
       setMyId(s.id || "");
       applyState(r);
-      setPendingRejoin(r.code, name);
+      setPendingRejoin(r.code, name, res.playerToken);
     });
   };
 
@@ -287,7 +281,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
     getSocket().emit("leave_room");
     setRoom(null);
     setMessages([]);
-    roomCodeRef.current = null;
     onBack();
   };
 
@@ -321,9 +314,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
             </button>
           )}
           {room && (
-            <button type="button" onClick={forceSync} style={{ ...link, fontSize: 11 }}>
-              ↻ Sync
-            </button>
+            <button type="button" onClick={forceSync} style={{ ...link, fontSize: 11 }}>↻ Sync</button>
           )}
         </div>
       </div>
@@ -333,7 +324,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
           background: "rgba(240,185,11,0.1)", border: "1px solid rgba(240,185,11,0.25)",
           borderRadius: 10, padding: "8px 12px", marginBottom: 10, fontSize: 12, color: "#f0b90b",
         }}>
-          Connection lost — auto reconnecting. Room will restore when back online.
+          Connection lost — auto reconnecting. Seat held for rejoin.
         </div>
       )}
 
@@ -393,12 +384,14 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                 const pct = Math.min(100, (p.pos / room.goal) * 100);
                 const isMe = p.id === myId;
                 const isTurn = turnId === p.id && room.status === "playing";
+                const offline = p.connected === false;
                 return (
-                  <div key={p.id} style={{ marginBottom: 10 }}>
+                  <div key={p.id} style={{ marginBottom: 10, opacity: offline ? 0.5 : 1 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                       <span style={{ fontWeight: 700, color: isMe ? "#0ecb81" : "#e6edf3" }}>
                         {isMe ? "You" : p.name}
                         {p.id === room.hostId ? " 👑" : ""}
+                        {offline ? " (away)" : ""}
                         {isTurn ? " ← turn" : ""}
                       </span>
                       <span style={{ fontWeight: 800 }}>{p.pos}/{room.goal}</span>
@@ -423,8 +416,10 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
 
             {room.status === "waiting" && isHost && (
               <button type="button" onClick={startGame} style={primary}
-                disabled={room.players.length < 2 || conn !== "connected"}>
-                {room.players.length < 2 ? "Waiting for players..." : "Start Game"}
+                disabled={room.players.filter((p) => p.connected !== false).length < 2 || conn !== "connected"}>
+                {room.players.filter((p) => p.connected !== false).length < 2
+                  ? "Waiting for players..."
+                  : "Start Game"}
               </button>
             )}
             {room.status === "waiting" && !isHost && (
@@ -470,11 +465,6 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                   height: 180, overflowY: "auto", padding: "8px 12px",
                   borderTop: "1px solid rgba(255,255,255,0.06)",
                 }}>
-                  {messages.length === 0 && (
-                    <div style={{ color: "#6e7681", fontSize: 12, textAlign: "center", padding: 20 }}>
-                      No messages yet
-                    </div>
-                  )}
                   {messages.map((m) => (
                     <div key={m.id} style={{ marginBottom: 8 }}>
                       {m.system ? (
@@ -499,11 +489,7 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                   ))}
                   <div ref={chatEndRef} />
                 </div>
-
-                <div style={{
-                  display: "flex", gap: 8, padding: 10,
-                  borderTop: "1px solid rgba(255,255,255,0.06)",
-                }}>
+                <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                   <input
                     value={chatText}
                     onChange={(e) => setChatText(e.target.value)}
@@ -511,14 +497,12 @@ export function LudoMultiplayer({ onBack }: { onBack: () => void }) {
                     placeholder={conn === "connected" ? "Type a message..." : "Reconnecting..."}
                     disabled={conn !== "connected"}
                     maxLength={200}
-                    style={
-                      {
-                        flex: 1, padding: "10px 12px", borderRadius: 10,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "rgba(255,255,255,0.04)", color: "#e6edf3",
-                        fontSize: 14, outline: "none",
-                      }
-                    }
+                    style={{
+                      flex: 1, padding: "10px 12px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      background: "rgba(255,255,255,0.04)", color: "#e6edf3",
+                      fontSize: 14, outline: "none",
+                    }}
                   />
                   <button type="button" onClick={sendChat} disabled={conn !== "connected"} style={{
                     padding: "10px 16px", borderRadius: 10, border: "none",
