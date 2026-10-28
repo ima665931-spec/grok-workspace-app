@@ -22,7 +22,10 @@ function code() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-/** Full public snapshot for realtime sync */
+function token() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 function snapshot(room) {
   return {
     code: room.code,
@@ -33,6 +36,8 @@ function snapshot(room) {
       id: p.id,
       name: p.name,
       pos: p.pos,
+      token: p.token,
+      connected: p.connected !== false,
     })),
     turn: room.turn,
     turnPlayerId: room.players[room.turn]?.id || null,
@@ -44,12 +49,11 @@ function snapshot(room) {
   };
 }
 
-function broadcastState(roomCode, event = "game_state") {
+function broadcastState(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
   const state = snapshot(room);
-  io.to(roomCode).emit(event, state);
-  // also keep legacy listeners working
+  io.to(roomCode).emit("game_state", state);
   io.to(roomCode).emit("room_update", state);
 }
 
@@ -58,7 +62,14 @@ io.on("connection", (socket) => {
 
   socket.on("create_room", ({ name, stake }, cb) => {
     const roomCode = code();
-    const player = { id: socket.id, name: name || "Player", pos: 0 };
+    const playerToken = token();
+    const player = {
+      id: socket.id,
+      token: playerToken,
+      name: name || "Player",
+      pos: 0,
+      connected: true,
+    };
     const room = {
       code: roomCode,
       stake: Math.max(0, Number(stake) || 0),
@@ -84,45 +95,82 @@ io.on("connection", (socket) => {
     socket.join(roomCode);
     socket.data.roomCode = roomCode;
     socket.data.playerName = name || "Player";
+    socket.data.playerToken = playerToken;
     const state = snapshot(room);
-    cb?.({ ok: true, room: state });
+    cb?.({ ok: true, room: state, playerToken });
     socket.emit("game_state", state);
   });
 
-  socket.on("join_room", ({ code: roomCode, name }, cb) => {
+  socket.on("join_room", ({ code: roomCode, name, playerToken }, cb) => {
     const key = String(roomCode || "").toUpperCase();
     const room = rooms.get(key);
     if (!room) return cb?.({ ok: false, error: "Room not found" });
-    if (room.status !== "waiting") return cb?.({ ok: false, error: "Game already started" });
-    if (room.players.length >= 4) return cb?.({ ok: false, error: "Room full" });
 
-    if (!room.players.some((p) => p.id === socket.id)) {
-      room.players.push({ id: socket.id, name: name || "Player", pos: 0 });
-      room.messages = [
-        ...(room.messages || []),
-        {
-          id: Date.now().toString(36),
-          userId: "system",
-          name: "System",
-          text: `${name || "Player"} joined the room`,
-          time: Date.now(),
-          system: true,
-        },
-      ].slice(-50);
+    // --- Rejoin existing player by token (works mid-game) ---
+    if (playerToken) {
+      const existing = room.players.find((p) => p.token === playerToken);
+      if (existing) {
+        const oldId = existing.id;
+        existing.id = socket.id;
+        existing.connected = true;
+        existing.name = name || existing.name;
+
+        // fix host / turn references if socket id changed
+        if (room.hostId === oldId) room.hostId = socket.id;
+        if (room.winner === oldId) room.winner = socket.id;
+
+        socket.join(key);
+        socket.data.roomCode = key;
+        socket.data.playerName = existing.name;
+        socket.data.playerToken = playerToken;
+
+        const state = snapshot(room);
+        cb?.({ ok: true, room: state, playerToken });
+        broadcastState(key);
+        return;
+      }
     }
+
+    // --- New join only while waiting ---
+    if (room.status !== "waiting") {
+      return cb?.({ ok: false, error: "Game already started" });
+    }
+    if (room.players.length >= 4) return cb?.({ ok: false, error: "Room full" });
+    if (room.players.some((p) => p.id === socket.id)) {
+      return cb?.({ ok: true, room: snapshot(room), playerToken: socket.data.playerToken });
+    }
+
+    const newToken = token();
+    room.players.push({
+      id: socket.id,
+      token: newToken,
+      name: name || "Player",
+      pos: 0,
+      connected: true,
+    });
+    room.messages = [
+      ...(room.messages || []),
+      {
+        id: Date.now().toString(36),
+        userId: "system",
+        name: "System",
+        text: `${name || "Player"} joined the room`,
+        time: Date.now(),
+        system: true,
+      },
+    ].slice(-50);
 
     socket.join(key);
     socket.data.roomCode = key;
     socket.data.playerName = name || "Player";
+    socket.data.playerToken = newToken;
 
     const state = snapshot(room);
-    cb?.({ ok: true, room: state });
-    // full sync to joiner + everyone
+    cb?.({ ok: true, room: state, playerToken: newToken });
     socket.emit("game_state", state);
     broadcastState(key);
   });
 
-  /** Client can request full sync anytime (reconnect / tab focus) */
   socket.on("request_sync", (cb) => {
     const key = socket.data.roomCode;
     const room = rooms.get(key);
@@ -150,7 +198,6 @@ io.on("connection", (socket) => {
     };
     room.messages = [...(room.messages || []), msg].slice(-50);
     io.to(key).emit("chat_message", msg);
-    // light state touch so late joiners stay consistent on next sync
     cb?.({ ok: true });
   });
 
@@ -159,7 +206,8 @@ io.on("connection", (socket) => {
     const room = rooms.get(key);
     if (!room) return cb?.({ ok: false, error: "No room" });
     if (room.hostId !== socket.id) return cb?.({ ok: false, error: "Only host can start" });
-    if (room.players.length < 2) return cb?.({ ok: false, error: "Need at least 2 players" });
+    if (room.players.filter((p) => p.connected !== false).length < 2)
+      return cb?.({ ok: false, error: "Need at least 2 players" });
 
     room.status = "playing";
     room.turn = 0;
@@ -196,7 +244,6 @@ io.on("connection", (socket) => {
     room.lastDice = dice;
     current.pos = Math.min(room.goal, current.pos + dice);
 
-    // announce roll in chat for clarity
     room.messages = [
       ...(room.messages || []),
       {
@@ -226,33 +273,53 @@ io.on("connection", (socket) => {
       return;
     }
 
-    room.turn = (room.turn + 1) % room.players.length;
+    // skip disconnected players on turn advance
+    let next = (room.turn + 1) % room.players.length;
+    let guard = 0;
+    while (room.players[next]?.connected === false && guard < room.players.length) {
+      next = (next + 1) % room.players.length;
+      guard++;
+    }
+    room.turn = next;
     broadcastState(key);
     cb?.({ ok: true, dice, state: snapshot(room) });
   });
 
   socket.on("leave_room", () => {
-    leaveRoom(socket);
+    leaveRoom(socket, true);
   });
 
   socket.on("disconnect", () => {
-    leaveRoom(socket);
+    // soft leave — keep seat for reconnect
+    leaveRoom(socket, false);
   });
 });
 
-function leaveRoom(socket) {
+function leaveRoom(socket, hard) {
   const key = socket.data.roomCode;
   if (!key) return;
   const room = rooms.get(key);
   if (!room) return;
 
   const leavingName = socket.data.playerName || "Player";
-  room.players = room.players.filter((p) => p.id !== socket.id);
+  const player = room.players.find((p) => p.id === socket.id);
+
+  if (hard) {
+    room.players = room.players.filter((p) => p.id !== socket.id);
+    socket.data.playerToken = null;
+  } else if (player) {
+    player.connected = false;
+  }
+
   socket.leave(key);
   socket.data.roomCode = null;
 
-  if (room.players.length === 0) {
-    rooms.delete(key);
+  const active = room.players.filter((p) => p.connected !== false);
+
+  if (room.players.length === 0 || (hard && active.length === 0)) {
+    // cleanup room if empty or all left hard
+    if (room.players.length === 0) rooms.delete(key);
+    else if (active.length === 0 && hard) rooms.delete(key);
     return;
   }
 
@@ -262,20 +329,30 @@ function leaveRoom(socket) {
       id: Date.now().toString(36),
       userId: "system",
       name: "System",
-      text: `${leavingName} left the room`,
+      text: hard ? `${leavingName} left the room` : `${leavingName} disconnected (can rejoin)`,
       time: Date.now(),
       system: true,
     },
   ].slice(-50);
 
-  if (room.hostId === socket.id) {
-    room.hostId = room.players[0].id;
+  if (room.hostId === socket.id && active[0]) {
+    room.hostId = active[0].id;
   }
-  if (room.turn >= room.players.length) room.turn = 0;
 
-  if (room.status === "playing" && room.players.length < 2) {
+  if (room.turn >= room.players.length) room.turn = 0;
+  if (room.players[room.turn]?.connected === false) {
+    let next = (room.turn + 1) % room.players.length;
+    let guard = 0;
+    while (room.players[next]?.connected === false && guard < room.players.length) {
+      next = (next + 1) % room.players.length;
+      guard++;
+    }
+    room.turn = next;
+  }
+
+  if (room.status === "playing" && active.length < 2) {
     room.status = "finished";
-    room.winner = room.players[0]?.id || null;
+    room.winner = active[0]?.id || null;
     io.to(key).emit("game_over", { winnerId: room.winner, room: snapshot(room) });
   }
 
